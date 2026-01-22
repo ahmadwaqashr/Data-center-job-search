@@ -1,8 +1,13 @@
+import 'dart:io';
 import 'package:data_center_job/view/candidate/auth/face_recognition_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:dio/dio.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../constants/colors.dart';
+import '../../../constants/api_config.dart';
+import '../../../models/signup_data.dart';
 
 class AddProfilePhotoScreen extends StatefulWidget {
   const AddProfilePhotoScreen({super.key});
@@ -12,20 +17,157 @@ class AddProfilePhotoScreen extends StatefulWidget {
 }
 
 class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
+  final Dio _dio = Dio();
+  final ImagePicker _imagePicker = ImagePicker();
+  
   // Selected avatar index (null means no avatar selected yet)
   int? selectedAvatarIndex;
 
-  // List of avatar images (using hardcoded image paths)
-  final List<String> avatars = [
-    'assets/images/avatar1.png',
-    'assets/images/avatar2.png',
-    'assets/images/avatar3.png',
-    'assets/images/avatar4.png',
-    'assets/images/avatar5.png',
-    'assets/images/avatar6.png',
-    'assets/images/avatar7.png',
-    'assets/images/avatar8.png',
-  ];
+  // Uploaded image file
+  File? _uploadedImage;
+  
+  // List of avatars from API
+  List<Map<String, dynamic>> avatars = [];
+  bool _isLoadingAvatars = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAvatars();
+  }
+
+  @override
+  void dispose() {
+    _dio.close();
+    super.dispose();
+  }
+
+  Future<void> _fetchAvatars() async {
+    setState(() {
+      _isLoadingAvatars = true;
+      _errorMessage = null;
+    });
+
+    try {
+      var data = '';
+      var response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchAvatar),
+        options: Options(
+          method: 'POST',
+        ),
+        data: data,
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        if (responseData['success'] == true && responseData['data'] != null) {
+          setState(() {
+            avatars = List<Map<String, dynamic>>.from(responseData['data']);
+            _isLoadingAvatars = false;
+          });
+        } else {
+          setState(() {
+            _errorMessage = 'Failed to load avatars';
+            _isLoadingAvatars = false;
+          });
+        }
+      } else {
+        setState(() {
+          _errorMessage = response.statusMessage ?? 'Failed to load avatars';
+          _isLoadingAvatars = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading avatars: ${e.toString()}';
+        _isLoadingAvatars = false;
+      });
+      print('Error fetching avatars: $e');
+    }
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+
+      if (image != null) {
+        setState(() {
+          _uploadedImage = File(image.path);
+          selectedAvatarIndex = null; // Clear avatar selection when uploading
+          // Save profile pic to SignupData
+          SignupData.instance.profilePicFile = _uploadedImage;
+          SignupData.instance.selectedAvatarIndex = null;
+          SignupData.instance.selectedAvatarUrl = null;
+          print('✅ Profile Pic File saved to SignupData:');
+          print('   Path: ${_uploadedImage!.path}');
+          print('   Source: Uploaded from ${source == ImageSource.camera ? "Camera" : "Gallery"}');
+          // Verify file exists and is saved
+          _uploadedImage!.exists().then((exists) {
+            print('   File exists check: $exists');
+            if (exists) {
+              _uploadedImage!.length().then((size) {
+                print('   File size on disk: $size bytes');
+              });
+            }
+          });
+          // Verify SignupData has the file
+          print('   SignupData.profilePicFile path: ${SignupData.instance.profilePicFile?.path ?? "NULL"}');
+        });
+      }
+    } catch (e) {
+      print('Error picking image: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error picking image: ${e.toString()}'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _showImageSourceDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(
+            'Select Image Source',
+            style: TextStyle(
+              fontSize: 18.sp,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.camera_alt, color: AppColors.primaryColor),
+                title: Text('Camera'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.photo_library, color: AppColors.primaryColor),
+                title: Text('Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -178,28 +320,43 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
                                         color: Color(0xFF2563EB),
                                         width: 3,
                                       ),
-                                      image:
-                                      selectedAvatarIndex != null
-                                          ? DecorationImage(
-                                        image: AssetImage(
-                                          avatars[selectedAvatarIndex!],
-                                        ),
+                                      color: Colors.grey[300],
+                                    ),
+                                    child: ClipOval(
+                                      child: _uploadedImage != null
+                                          ? Image.file(
+                                              _uploadedImage!,
                                         fit: BoxFit.cover,
                                       )
-                                          : null,
-                                      color:
-                                      selectedAvatarIndex == null
-                                          ? Colors.grey[300]
+                                          : selectedAvatarIndex != null && avatars.isNotEmpty
+                                              ? Image.network(
+                                                  ApiConfig.getImageUrl(avatars[selectedAvatarIndex!]['imageUrl']),
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (context, error, stackTrace) {
+                                                    return Icon(
+                                                      Icons.person,
+                                                      size: 60.sp,
+                                                      color: Colors.grey[500],
+                                                    );
+                                                  },
+                                                  loadingBuilder: (context, child, loadingProgress) {
+                                                    if (loadingProgress == null) return child;
+                                                    return Center(
+                                                      child: CircularProgressIndicator(
+                                                        value: loadingProgress.expectedTotalBytes != null
+                                                            ? loadingProgress.cumulativeBytesLoaded /
+                                                                loadingProgress.expectedTotalBytes!
                                           : null,
                                     ),
-                                    child:
-                                    selectedAvatarIndex == null
-                                        ? Icon(
+                                                    );
+                                                  },
+                                                )
+                                              : Icon(
                                       Icons.person,
                                       size: 60.sp,
                                       color: Colors.grey[500],
-                                    )
-                                        : null,
+                                                ),
+                                    ),
                                   ),
                                   SizedBox(height: 12.h),
                                   Text(
@@ -225,7 +382,63 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
                             ),
                             SizedBox(height: 16.h),
                             // Avatar Grid
-                            GridView.builder(
+                            _isLoadingAvatars
+                                ? Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.symmetric(vertical: 20.h),
+                                      child: CircularProgressIndicator(
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          AppColors.primaryColor,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : _errorMessage != null
+                                    ? Column(
+                                        children: [
+                                          Text(
+                                            _errorMessage!,
+                                            style: TextStyle(
+                                              fontSize: 14.sp,
+                                              color: Colors.red,
+                                            ),
+                                          ),
+                                          SizedBox(height: 10.h),
+                                          GestureDetector(
+                                            onTap: _fetchAvatars,
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 16.w,
+                                                vertical: 10.h,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryColor,
+                                                borderRadius: BorderRadius.circular(20.r),
+                                              ),
+                                              child: Text(
+                                                'Retry',
+                                                style: TextStyle(
+                                                  fontSize: 14.sp,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : avatars.isEmpty
+                                        ? Padding(
+                                            padding: EdgeInsets.symmetric(vertical: 20.h),
+                                            child: Text(
+                                              'No avatars available',
+                                              style: TextStyle(
+                                                fontSize: 14.sp,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          )
+                                        : GridView.builder(
                               shrinkWrap: true,
                               physics: NeverScrollableScrollPhysics(),
                               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -233,34 +446,64 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
                                 crossAxisSpacing: 16.w,
                                 mainAxisSpacing: 16.h,
                               ),
-                              itemCount: 8,
+                                            itemCount: avatars.length,
                               itemBuilder: (context, index) {
                                 final isSelected = selectedAvatarIndex == index;
+                                              final avatarUrl = ApiConfig.getImageUrl(avatars[index]['imageUrl']);
 
                                 return GestureDetector(
                                   onTap: () {
                                     setState(() {
                                       selectedAvatarIndex = index;
+                                                    _uploadedImage = null; // Clear uploaded image when selecting avatar
+                                                    // Save avatar selection to SignupData
+                                                    SignupData.instance.selectedAvatarIndex = index;
+                                                    SignupData.instance.selectedAvatarUrl = avatarUrl;
+                                                    SignupData.instance.profilePicFile = null;
+                                                    print('✅ Avatar selected and saved to SignupData:');
+                                                    print('   Avatar Index: $index');
+                                                    print('   Avatar URL: $avatarUrl');
+                                                    print('   Full URL: ${ApiConfig.getImageUrl(avatarUrl)}');
                                     });
                                   },
                                   child: Container(
                                     decoration: BoxDecoration(
                                       shape: BoxShape.circle,
                                       border: Border.all(
-                                        color:
-                                        isSelected
+                                                      color: isSelected
                                             ? Color(0xFF2563EB)
                                             : Colors.transparent,
                                         width: 3,
                                       ),
                                     ),
-                                    child: Container(
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        image: DecorationImage(
-                                          image: AssetImage(avatars[index]),
+                                                  child: ClipOval(
+                                                    child: Image.network(
+                                                      avatarUrl,
                                           fit: BoxFit.cover,
-                                        ),
+                                                      errorBuilder: (context, error, stackTrace) {
+                                                        return Container(
+                                                          color: Colors.grey[300],
+                                                          child: Icon(
+                                                            Icons.person,
+                                                            color: Colors.grey[500],
+                                                          ),
+                                                        );
+                                                      },
+                                                      loadingBuilder: (context, child, loadingProgress) {
+                                                        if (loadingProgress == null) return child;
+                                                        return Container(
+                                                          color: Colors.grey[200],
+                                                          child: Center(
+                                                            child: CircularProgressIndicator(
+                                                              strokeWidth: 2,
+                                                              value: loadingProgress.expectedTotalBytes != null
+                                                                  ? loadingProgress.cumulativeBytesLoaded /
+                                                                      loadingProgress.expectedTotalBytes!
+                                                                  : null,
+                                                            ),
+                                                          ),
+                                                        );
+                                                      },
                                       ),
                                     ),
                                   ),
@@ -310,9 +553,7 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
                                     ),
                                   ),
                                   GestureDetector(
-                                    onTap: () {
-                                      // Upload image functionality (hardcoded)
-                                    },
+                                    onTap: _showImageSourceDialog,
                                     child: Container(
                                       padding: EdgeInsets.symmetric(
                                         horizontal: 20.w,
@@ -343,6 +584,17 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
                       // Save and continue Button
                       GestureDetector(
                         onTap: () {
+                          // Validate profile photo
+                          if (_uploadedImage == null && selectedAvatarIndex == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Please select a profile photo or avatar'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          
                           Navigator.push(
                               context,
                               MaterialPageRoute(builder: (context) => FaceRecognitionScreen(),));

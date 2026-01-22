@@ -1,8 +1,12 @@
+import 'dart:io';
 import 'package:data_center_job/view/candidate/auth/add_profile_photo_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:get/get.dart';
 
 import '../../../constants/colors.dart';
+import '../../../models/signup_data.dart';
 
 class UploadCvScreen extends StatefulWidget {
   const UploadCvScreen({super.key});
@@ -12,7 +16,94 @@ class UploadCvScreen extends StatefulWidget {
 }
 
 class _UploadCvScreenState extends State<UploadCvScreen> {
-  bool hasUploadedFile = true; // Hardcoded as true to show suggested file
+  // Selected file
+  PlatformFile? _selectedFile;
+  File? _file;
+  
+  bool get hasUploadedFile => _selectedFile != null;
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) {
+      return '$bytes B';
+    } else if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    } else {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+  }
+
+  String _getFileType(String? extension) {
+    if (extension == null) return 'PDF';
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'PDF';
+      case 'doc':
+      case 'docx':
+        return 'DOC';
+      default:
+        return extension.toUpperCase();
+    }
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.single.path != null) {
+        PlatformFile file = result.files.single;
+        
+        // Check file size (5 MB limit)
+        if (file.size > 5 * 1024 * 1024) {
+          Get.snackbar(
+            'File too large',
+            'Please select a file smaller than 5 MB',
+            snackPosition: SnackPosition.BOTTOM,
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+          );
+          return;
+        }
+
+        setState(() {
+          _selectedFile = file;
+          _file = File(file.path!);
+          // Save CV file to SignupData
+          SignupData.instance.cvFile = _file;
+          print('✅ CV File saved to SignupData:');
+          print('   Path: ${_file?.path ?? "NULL"}');
+          print('   Name: ${file.name}');
+          print('   Size: ${file.size} bytes');
+          print('   Extension: ${file.extension}');
+          // Verify file exists and is saved
+          if (_file != null) {
+            _file!.exists().then((exists) {
+              print('   File exists check: $exists');
+              if (exists) {
+                _file!.length().then((size) {
+                  print('   File size on disk: $size bytes');
+                });
+              }
+            });
+          }
+          // Verify SignupData has the file
+          print('   SignupData.cvFile path: ${SignupData.instance.cvFile?.path ?? "NULL"}');
+        });
+      }
+    } catch (e) {
+      print('Error picking file: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to pick file: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +241,10 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Container(
+                            InkWell(
+                              onTap: _pickFile,
+                              borderRadius: BorderRadius.circular(20.r),
+                              child: Container(
                               width: double.infinity,
                               decoration: BoxDecoration(
                                 color: Color(0xFFF9FAFB),
@@ -201,18 +295,16 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                   ),
                                   SizedBox(height: 20.h),
                                   // Browse files button
-                                  GestureDetector(
-                                    onTap: () {
-                                      // File picker functionality (hardcoded)
-                                    },
+                                  Material(
+                                    color: Color(0xFF2563EB),
+                                    borderRadius: BorderRadius.circular(25.r),
+                                    child: InkWell(
+                                      onTap: _pickFile,
+                                      borderRadius: BorderRadius.circular(25.r),
                                     child: Container(
                                       padding: EdgeInsets.symmetric(
                                         horizontal: 24.w,
                                         vertical: 12.h,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Color(0xFF2563EB),
-                                        borderRadius: BorderRadius.circular(25.r),
                                       ),
                                       child: Text(
                                         'Browse files',
@@ -220,11 +312,13 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                           fontSize: 14.sp,
                                           fontWeight: FontWeight.w600,
                                           color: Colors.white,
+                                          ),
                                         ),
                                       ),
                                     ),
                                   ),
                                 ],
+                              ),
                               ),
                             ),
                             SizedBox(height: 24.h),
@@ -273,16 +367,20 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                         crossAxisAlignment: CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            'resume_datacenter.pdf',
+                                            _selectedFile?.name ?? 'resume_datacenter.pdf',
                                             style: TextStyle(
                                               fontSize: 14.sp,
                                               fontWeight: FontWeight.w500,
                                               color: Colors.black,
                                             ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                           ),
                                           SizedBox(height: 2.h),
                                           Text(
-                                            '324 KB · Updated just now',
+                                            _selectedFile != null
+                                                ? '${_formatFileSize(_selectedFile!.size)} • ${_getFileType(_selectedFile!.extension)} • Updated just now'
+                                                : '324 KB · Updated just now',
                                             style: TextStyle(
                                               fontSize: 12.sp,
                                               color: Colors.grey[600],
@@ -292,10 +390,16 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                       ),
                                     ),
                                     // Change button
-                                    GestureDetector(
-                                      onTap: () {
-                                        // Change file functionality (hardcoded)
-                                      },
+                                    TextButton(
+                                      onPressed: _pickFile,
+                                      style: TextButton.styleFrom(
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 12.w,
+                                          vertical: 8.h,
+                                        ),
+                                        minimumSize: Size.zero,
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
                                       child: Text(
                                         'Change',
                                         style: TextStyle(
@@ -312,7 +416,7 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                           ],
                         ),
                       ),
-                      SizedBox(height: 20..h,),
+                      SizedBox(height: 20.h),
                       // Update note
                       Center(
                         child: Text(
@@ -328,6 +432,18 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                       // Continue Button
                       GestureDetector(
                         onTap: () {
+                          // Validate CV upload
+                          if (_selectedFile == null) {
+                            Get.snackbar(
+                              'CV Required',
+                              'Please upload your CV to continue',
+                              snackPosition: SnackPosition.BOTTOM,
+                              backgroundColor: Colors.red,
+                              colorText: Colors.white,
+                            );
+                            return;
+                          }
+                          
                           Navigator.push(
                               context,
                               MaterialPageRoute(builder: (context) => AddProfilePhotoScreen(),));

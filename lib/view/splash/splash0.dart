@@ -1,7 +1,9 @@
 import 'dart:async';
-
+import 'dart:convert';
 import 'package:data_center_job/view/splash/splash_wrapper.dart';
+import 'package:data_center_job/view/candidate/dashboard/dashboard_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class Splash0 extends StatefulWidget {
   const Splash0({super.key});
@@ -14,13 +16,61 @@ class _Splash0State extends State<Splash0> {
   @override
   void initState() {
     super.initState();
-    Timer(
-      Duration(seconds: 3),
-      () => Navigator.push(
+    _checkAuthAndNavigate();
+  }
+
+  Future<void> _checkAuthAndNavigate() async {
+    // Wait for splash screen duration
+    await Future.delayed(Duration(seconds: 3));
+    
+    if (!mounted) return;
+    
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Check if user data exists
+      final userDataString = prefs.getString('user_data');
+      final userRole = prefs.getString('user_role');
+      final authToken = prefs.getString('auth_token');
+      
+      print('🔍 Checking authentication status...');
+      print('   User data exists: ${userDataString != null}');
+      print('   User role: ${userRole ?? "NULL"}');
+      print('   Auth token exists: ${authToken != null}');
+      
+      // If user exists and role is candidate, navigate to dashboard
+      if (userDataString != null && 
+          userRole == 'candidate' && 
+          authToken != null && 
+          authToken.isNotEmpty) {
+        print('✅ User is authenticated as candidate, navigating to dashboard');
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => DashboardScreen()),
+          );
+        }
+        return;
+      }
+      
+      // Otherwise, navigate to splash wrapper (onboarding/auth flow)
+      print('ℹ️ No authenticated user found, navigating to onboarding');
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => SplashWrapper()),
+        );
+      }
+    } catch (e) {
+      print('❌ Error checking authentication: $e');
+      // On error, navigate to splash wrapper
+      if (mounted) {
+        Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => SplashWrapper()),
-      ),
     );
+      }
+    }
   }
 
   @override

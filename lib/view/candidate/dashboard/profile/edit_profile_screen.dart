@@ -1,7 +1,13 @@
+import 'dart:convert';
+import 'dart:io';
+import 'package:data_center_job/constants/api_config.dart';
 import 'package:data_center_job/utils/custom_button.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:get/get.dart';
+import 'package:get/get.dart' hide FormData, MultipartFile;
+import 'package:image_picker/image_picker.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class EditProfileScreen extends StatefulWidget {
   const EditProfileScreen({super.key});
@@ -11,18 +17,274 @@ class EditProfileScreen extends StatefulWidget {
 }
 
 class _EditProfileScreenState extends State<EditProfileScreen> {
-  final TextEditingController _fullNameController = TextEditingController(
-    text: 'Alex Johnson',
-  );
-  final TextEditingController _emailController = TextEditingController(
-    text: 'alex.johnson@example.com',
-  );
-  final TextEditingController _phoneController = TextEditingController(
-    text: '(206) 555-0134',
-  );
-  final TextEditingController _locationController = TextEditingController(
-    text: 'Seattle, WA',
-  );
+  final TextEditingController _fullNameController = TextEditingController();
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _phoneController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
+
+  bool _isLoading = true;
+  bool _isSaving = false;
+  Map<String, dynamic>? _userData;
+  String? _profilePicUrl;
+  File? _selectedImageFile;
+  final ImagePicker _imagePicker = ImagePicker();
+  final Dio _dio = Dio();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  Future<void> _pickImage() async {
+    try {
+      // Show bottom sheet to choose between camera and gallery
+      final source = await showModalBottomSheet<ImageSource>(
+        context: context,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20.r)),
+        ),
+        builder: (context) => Container(
+          padding: EdgeInsets.symmetric(vertical: 20.h),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.camera_alt, color: Colors.blue),
+                title: Text('Take Photo'),
+                onTap: () => Navigator.pop(context, ImageSource.camera),
+              ),
+              ListTile(
+                leading: Icon(Icons.photo_library, color: Colors.blue),
+                title: Text('Choose from Gallery'),
+                onTap: () => Navigator.pop(context, ImageSource.gallery),
+              ),
+              SizedBox(height: 10.h),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text('Cancel'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      if (source != null) {
+        final XFile? image = await _imagePicker.pickImage(
+          source: source,
+          imageQuality: 85,
+          maxWidth: 800,
+          maxHeight: 800,
+        );
+
+        if (image != null) {
+          setState(() {
+            _selectedImageFile = File(image.path);
+            _profilePicUrl = null; // Clear network image when new image is selected
+          });
+          print('✅ Profile picture selected: ${_selectedImageFile?.path}');
+        }
+      }
+    } catch (e) {
+      print('❌ Error picking image: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to pick image: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  Future<void> _saveChanges() async {
+    try {
+      setState(() {
+        _isSaving = true;
+      });
+
+      // Get token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final userDataString = prefs.getString('user_data');
+      String? token;
+
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+        token = userData['token']?.toString();
+      }
+
+      if (token == null || token.isEmpty) {
+        throw Exception('No authentication token found. Please login again.');
+      }
+
+      print('📤 Preparing to save profile changes...');
+      print('   Full Name: ${_fullNameController.text}');
+      print('   Location: ${_locationController.text}');
+      print('   Profile Pic Selected: ${_selectedImageFile != null}');
+
+      // Prepare data map for FormData
+      final Map<String, dynamic> dataMap = {};
+
+      // Add profile picture file if selected (optional)
+      if (_selectedImageFile != null) {
+        print('   Adding profile picture file: ${_selectedImageFile!.path}');
+        final fileName = _selectedImageFile!.path.split('/').last;
+        dataMap['profile_pic'] = await MultipartFile.fromFile(
+          _selectedImageFile!.path,
+          filename: fileName,
+        );
+      }
+
+      // Add fullname if changed (optional)
+      final currentFullName = _userData?['fullName']?.toString() ?? '';
+      final newFullName = _fullNameController.text.trim();
+      if (newFullName.isNotEmpty && newFullName != currentFullName) {
+        dataMap['fullname'] = newFullName;
+        print('   Adding fullname: $newFullName');
+      }
+
+      // Add location if changed (optional)
+      final currentLocation = _userData?['location']?.toString() ?? '';
+      final newLocation = _locationController.text.trim();
+      if (newLocation.isNotEmpty && newLocation != currentLocation) {
+        dataMap['location'] = newLocation;
+        print('   Adding location: $newLocation');
+      }
+
+      // Check if there are any changes
+      if (dataMap.isEmpty) {
+        Get.snackbar(
+          'Info',
+          'No changes to save',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.blue,
+          colorText: Colors.white,
+        );
+        setState(() {
+          _isSaving = false;
+        });
+        return;
+      }
+
+      // Create FormData from map (matches API structure)
+      final formData = FormData.fromMap(dataMap);
+
+      print('🌐 Making API call to: ${ApiConfig.getUrl(ApiConfig.editMyProfile)}');
+      print('   Data map keys: ${dataMap.keys.toList()}');
+      print('   FormData structure:');
+      print('     - profile_pic: ${dataMap['profile_pic'] != null ? 'Present (file)' : 'Not included'}');
+      print('     - fullname: ${dataMap['fullname'] ?? 'Not included'}');
+      print('     - location: ${dataMap['location'] ?? 'Not included'}');
+      if (_selectedImageFile != null) {
+        print('     - Profile pic file path: ${_selectedImageFile!.path}');
+        print('     - Profile pic file name: ${_selectedImageFile!.path.split('/').last}');
+      }
+
+      // Make API call
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.editMyProfile),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: formData,
+      );
+
+      if (response.statusCode == 200) {
+        print('✅ Profile updated successfully');
+        print('   Response: ${jsonEncode(response.data)}');
+
+        // Update SharedPreferences with new data
+        final updatedUserData = response.data as Map<String, dynamic>;
+        await prefs.setString('user_data', jsonEncode(updatedUserData));
+
+        // Update local state
+        setState(() {
+          _userData = updatedUserData;
+          _profilePicUrl = updatedUserData['profilePic'] != null
+              ? ApiConfig.getImageUrl(updatedUserData['profilePic'].toString())
+              : null;
+          _selectedImageFile = null; // Clear selected file after successful upload
+        });
+
+        Get.snackbar(
+          'Success',
+          'Profile updated successfully',
+          snackPosition: SnackPosition.BOTTOM,
+          backgroundColor: Colors.green,
+          colorText: Colors.white,
+        );
+
+        // Navigate back after a short delay with result indicating success
+        Future.delayed(Duration(milliseconds: 500), () {
+          Navigator.pop(context, true); // Return true to indicate profile was updated
+        });
+      } else {
+        throw Exception('Failed to update profile: ${response.statusMessage}');
+      }
+    } catch (e) {
+      print('❌ Error saving profile: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to update profile: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    } finally {
+      setState(() {
+        _isSaving = false;
+      });
+    }
+  }
+
+  Future<void> _loadUserData() async {
+    try {
+      print('📥 Loading user data from SharedPreferences...');
+      final prefs = await SharedPreferences.getInstance();
+
+      final userDataString = prefs.getString('user_data');
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+        print('✅ User data loaded:');
+        print('   Full Name: ${userData['fullName']}');
+        print('   Email: ${userData['email']}');
+        print('   Phone: ${userData['phone']}');
+        print('   Location: ${userData['location']}');
+        print('   Profile Pic: ${userData['profilePic']}');
+
+        setState(() {
+          _userData = userData;
+          _fullNameController.text = userData['fullName']?.toString() ?? '';
+          _emailController.text = userData['email']?.toString() ?? '';
+          
+          // Set phone number
+          _phoneController.text = userData['phone']?.toString() ?? '';
+          
+          _locationController.text = userData['location']?.toString() ?? '';
+          
+          // Set profile picture URL
+          if (userData['profilePic'] != null && userData['profilePic'].toString().isNotEmpty) {
+            _profilePicUrl = ApiConfig.getImageUrl(userData['profilePic'].toString());
+          }
+          
+          _isLoading = false;
+        });
+      } else {
+        print('⚠️ No user data found in SharedPreferences');
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error loading user data: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -141,10 +403,47 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             ),
                           ),
                         ),
+                        GestureDetector(
+                          onTap: _pickImage,
+                          child: Stack(
+                            children: [
                         CircleAvatar(
                           radius: 20.r,
-                          backgroundImage: AssetImage(
-                            'assets/images/avatar1.png',
+                                backgroundImage: _selectedImageFile != null
+                                    ? FileImage(_selectedImageFile!)
+                                    : (_profilePicUrl != null
+                                        ? NetworkImage(_profilePicUrl!)
+                                        : AssetImage('assets/images/avatar1.png') as ImageProvider),
+                                onBackgroundImageError: (exception, stackTrace) {
+                                  // Fallback to default avatar if network image fails
+                                  setState(() {
+                                    _profilePicUrl = null;
+                                  });
+                                },
+                              ),
+                              // Plus icon overlay
+                              Positioned(
+                                bottom: 0,
+                                right: 0,
+                                child: Container(
+                                  width: 16.w,
+                                  height: 16.h,
+                                  decoration: BoxDecoration(
+                                    color: Colors.blue,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                  ),
+                                  child: Icon(
+                                    Icons.add,
+                                    size: 12.sp,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -152,7 +451,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                   ),
                   // Scrollable content
                   Expanded(
-                    child: SingleChildScrollView(
+                    child: _isLoading
+                        ? Center(
+                            child: CircularProgressIndicator(),
+                          )
+                        : SingleChildScrollView(
                       padding: EdgeInsets.symmetric(horizontal: 20.w),
                       child: Container(
                         padding: EdgeInsets.symmetric(horizontal: 15,vertical: 15),
@@ -240,9 +543,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               child: TextField(
                                 controller: _emailController,
                                 keyboardType: TextInputType.emailAddress,
+                                readOnly: true,
                                 style: TextStyle(
                                   fontSize: 15.sp,
-                                  color: Colors.black,
+                                  color: Colors.grey[600],
                                   fontWeight: FontWeight.w500,
                                 ),
                                 decoration: InputDecoration(
@@ -290,32 +594,17 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               child: TextField(
                                 controller: _phoneController,
                                 keyboardType: TextInputType.phone,
+                                readOnly: true,
                                 style: TextStyle(
                                   fontSize: 15.sp,
-                                  color: Colors.black,
+                                  color: Colors.grey[600],
                                   fontWeight: FontWeight.w500,
                                 ),
                                 decoration: InputDecoration(
-                                  prefixIcon: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      SizedBox(width: 12.w),
-                                      Icon(
+                                  prefixIcon: Icon(
                                         Icons.phone_outlined,
                                         color: Colors.grey[600],
                                         size: 22.sp,
-                                      ),
-                                      SizedBox(width: 12.w),
-                                      Text(
-                                        '+1',
-                                        style: TextStyle(
-                                          fontSize: 15.sp,
-                                          color: Colors.black,
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                      ),
-                                      SizedBox(width: 8.w),
-                                    ],
                                   ),
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.symmetric(
@@ -399,10 +688,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                             SizedBox(height: 10.h),
                             // Save changes button
                             GestureDetector(
-                                onTap: (){
-                                  Navigator.pop(context);
-                                },
-                                child: CustomButton(text: 'Save Changes')),
+                              onTap: _isSaving ? null : _saveChanges,
+                              child: Opacity(
+                                opacity: _isSaving ? 0.6 : 1.0,
+                                child: CustomButton(
+                                  text: _isSaving ? 'Saving...' : 'Save Changes',
+                                ),
+                              ),
+                            ),
                             // Cancel button
                             Center(
                               child: TextButton(

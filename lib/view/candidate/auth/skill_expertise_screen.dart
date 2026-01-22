@@ -1,8 +1,12 @@
+import 'dart:convert';
 import 'package:data_center_job/view/candidate/auth/upload_cv_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:dio/dio.dart';
 
 import '../../../constants/colors.dart';
+import '../../../constants/api_config.dart';
+import '../../../models/signup_data.dart';
 
 class SkillExpertiseScreen extends StatefulWidget {
   const SkillExpertiseScreen({super.key});
@@ -13,25 +17,141 @@ class SkillExpertiseScreen extends StatefulWidget {
 
 class _SkillExpertiseScreenState extends State<SkillExpertiseScreen> {
   final TextEditingController _searchController = TextEditingController();
+  final Dio _dio = Dio();
 
   // Selected skills
   List<String> selectedCoreSkills = [];
   String selectedExperienceLevel = '';
 
-  // Available skills
-  final List<String> coreSkills = [
-    'Server & Hardware',
-    'Network Operations',
-    'Infrastructure Monitoring',
-    'Facilities & Cooling',
-  ];
+  // Available skills from API
+  List<Map<String, dynamic>> coreSkills = [];
+  bool _isLoadingSkills = true;
+  String? _errorMessage;
 
-  final List<String> experienceLevels = ['Entry level', 'Mid level', 'Senior'];
+  // Experience levels from API
+  List<Map<String, dynamic>> experienceLevels = [];
+  bool _isLoadingExperienceLevels = true;
+  String? _errorMessageExperienceLevels;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCoreExpertise();
+    _fetchExperienceLevels();
+    _searchController.addListener(_filterSkills);
+  }
+
+  void _filterSkills() {
+    setState(() {
+      // Filtering is handled in the build method
+    });
+  }
+
+  List<Map<String, dynamic>> get _filteredSkills {
+    if (_searchController.text.isEmpty) {
+      return coreSkills;
+    }
+    final query = _searchController.text.toLowerCase();
+    return coreSkills.where((skill) {
+      final name = (skill['name'] ?? '').toString().toLowerCase();
+      return name.contains(query);
+    }).toList();
+  }
 
   @override
   void dispose() {
+    _searchController.removeListener(_filterSkills);
     _searchController.dispose();
+    _dio.close();
     super.dispose();
+  }
+
+  Future<void> _fetchCoreExpertise() async {
+    setState(() {
+      _isLoadingSkills = true;
+      _errorMessage = null;
+    });
+
+    try {
+      var data = '';
+      var response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchCoreExpertise),
+        options: Options(
+          method: 'POST',
+        ),
+        data: data,
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        if (responseData['success'] == true && responseData['data'] != null) {
+          setState(() {
+            coreSkills = List<Map<String, dynamic>>.from(responseData['data']);
+            _isLoadingSkills = false;
+          });
+        } else {
+          setState(() {
+            _errorMessage = 'Failed to load skills';
+            _isLoadingSkills = false;
+          });
+        }
+      } else {
+        setState(() {
+          _errorMessage = response.statusMessage ?? 'Failed to load skills';
+          _isLoadingSkills = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading skills: ${e.toString()}';
+        _isLoadingSkills = false;
+      });
+      print('Error fetching core expertise: $e');
+    }
+  }
+
+  Future<void> _fetchExperienceLevels() async {
+    setState(() {
+      _isLoadingExperienceLevels = true;
+      _errorMessageExperienceLevels = null;
+    });
+
+    try {
+      var data = '';
+      var response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchExperienceLevel),
+        options: Options(
+          method: 'POST',
+        ),
+        data: data,
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        if (responseData['success'] == true && responseData['data'] != null) {
+          setState(() {
+            experienceLevels = List<Map<String, dynamic>>.from(responseData['data']);
+            _isLoadingExperienceLevels = false;
+          });
+        } else {
+          setState(() {
+            _errorMessageExperienceLevels = 'Failed to load experience levels';
+            _isLoadingExperienceLevels = false;
+          });
+        }
+      } else {
+        setState(() {
+          _errorMessageExperienceLevels = response.statusMessage ?? 'Failed to load experience levels';
+          _isLoadingExperienceLevels = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessageExperienceLevels = 'Error loading experience levels: ${e.toString()}';
+        _isLoadingExperienceLevels = false;
+      });
+      print('Error fetching experience levels: $e');
+    }
   }
 
   @override
@@ -228,20 +348,77 @@ class _SkillExpertiseScreenState extends State<SkillExpertiseScreen> {
                             ),
                             SizedBox(height: 12.h),
                             // Core Skills Chips
-                            Wrap(
+                            _isLoadingSkills
+                                ? Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.symmetric(vertical: 20.h),
+                                      child: CircularProgressIndicator(
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          AppColors.primaryColor,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : _errorMessage != null
+                                    ? Column(
+                                        children: [
+                                          Text(
+                                            _errorMessage!,
+                                            style: TextStyle(
+                                              fontSize: 14.sp,
+                                              color: Colors.red,
+                                            ),
+                                          ),
+                                          SizedBox(height: 10.h),
+                                          GestureDetector(
+                                            onTap: _fetchCoreExpertise,
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 16.w,
+                                                vertical: 10.h,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryColor,
+                                                borderRadius: BorderRadius.circular(20.r),
+                                              ),
+                                              child: Text(
+                                                'Retry',
+                                                style: TextStyle(
+                                                  fontSize: 14.sp,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                        : _filteredSkills.isEmpty
+                                        ? Padding(
+                                            padding: EdgeInsets.symmetric(vertical: 20.h),
+                                            child: Text(
+                                              _searchController.text.isNotEmpty
+                                                  ? 'No skills found matching "${_searchController.text}"'
+                                                  : 'No skills available',
+                                              style: TextStyle(
+                                                fontSize: 14.sp,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          )
+                                        : Wrap(
                               spacing: 10.w,
                               runSpacing: 10.h,
-                              children:
-                                  coreSkills.map((skill) {
-                                    final isSelected = selectedCoreSkills
-                                        .contains(skill);
+                                            children: _filteredSkills.map((skillData) {
+                                              final skillName = skillData['name'] ?? '';
+                                              final isSelected = selectedCoreSkills.contains(skillName);
                                     return GestureDetector(
                                       onTap: () {
                                         setState(() {
                                           if (isSelected) {
-                                            selectedCoreSkills.remove(skill);
+                                                      selectedCoreSkills.remove(skillName);
                                           } else {
-                                            selectedCoreSkills.add(skill);
+                                                      selectedCoreSkills.add(skillName);
                                           }
                                         });
                                       },
@@ -251,22 +428,17 @@ class _SkillExpertiseScreenState extends State<SkillExpertiseScreen> {
                                           vertical: 10.h,
                                         ),
                                         decoration: BoxDecoration(
-                                          color:
-                                              isSelected
+                                                    color: isSelected
                                                   ? Color(0xFF2563EB)
                                                   : Colors.grey[100],
-                                          borderRadius: BorderRadius.circular(
-                                            20.r,
-                                          ),
-
+                                                    borderRadius: BorderRadius.circular(20.r),
                                         ),
                                         child: Text(
-                                          skill,
+                                                    skillName,
                                           style: TextStyle(
                                             fontSize: 14.sp,
                                             fontWeight: FontWeight.w500,
-                                            color:
-                                                isSelected
+                                                      color: isSelected
                                                     ? Colors.white
                                                     : Colors.black,
                                           ),
@@ -287,17 +459,72 @@ class _SkillExpertiseScreenState extends State<SkillExpertiseScreen> {
                             ),
                             SizedBox(height: 12.h),
                             // Experience Level Chips
-                            Wrap(
+                            _isLoadingExperienceLevels
+                                ? Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.symmetric(vertical: 20.h),
+                                      child: CircularProgressIndicator(
+                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                          AppColors.primaryColor,
+                                        ),
+                                      ),
+                                    ),
+                                  )
+                                : _errorMessageExperienceLevels != null
+                                    ? Column(
+                                        children: [
+                                          Text(
+                                            _errorMessageExperienceLevels!,
+                                            style: TextStyle(
+                                              fontSize: 14.sp,
+                                              color: Colors.red,
+                                            ),
+                                          ),
+                                          SizedBox(height: 10.h),
+                                          GestureDetector(
+                                            onTap: _fetchExperienceLevels,
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 16.w,
+                                                vertical: 10.h,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryColor,
+                                                borderRadius: BorderRadius.circular(20.r),
+                                              ),
+                                              child: Text(
+                                                'Retry',
+                                                style: TextStyle(
+                                                  fontSize: 14.sp,
+                                                  fontWeight: FontWeight.w500,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : experienceLevels.isEmpty
+                                        ? Padding(
+                                            padding: EdgeInsets.symmetric(vertical: 20.h),
+                                            child: Text(
+                                              'No experience levels available',
+                                              style: TextStyle(
+                                                fontSize: 14.sp,
+                                                color: Colors.grey[600],
+                                              ),
+                                            ),
+                                          )
+                                        : Wrap(
                               spacing: 10.w,
                               runSpacing: 10.h,
-                              children:
-                                  experienceLevels.map((level) {
-                                    final isSelected =
-                                        selectedExperienceLevel == level;
+                                            children: experienceLevels.map((levelData) {
+                                              final levelName = levelData['name'] ?? '';
+                                              final isSelected = selectedExperienceLevel == levelName;
                                     return GestureDetector(
                                       onTap: () {
                                         setState(() {
-                                          selectedExperienceLevel = level;
+                                                    selectedExperienceLevel = levelName;
                                         });
                                       },
                                       child: Container(
@@ -306,21 +533,17 @@ class _SkillExpertiseScreenState extends State<SkillExpertiseScreen> {
                                           vertical: 10.h,
                                         ),
                                         decoration: BoxDecoration(
-                                          color:
-                                              isSelected
+                                                    color: isSelected
                                                   ? Color(0xFF2563EB)
                                                   : Colors.grey[100],
-                                          borderRadius: BorderRadius.circular(
-                                            20.r,
-                                          ),
+                                                    borderRadius: BorderRadius.circular(20.r),
                                         ),
                                         child: Text(
-                                          level,
+                                                    levelName,
                                           style: TextStyle(
                                             fontSize: 14.sp,
                                             fontWeight: FontWeight.w500,
-                                            color:
-                                                isSelected
+                                                      color: isSelected
                                                     ? Colors.white
                                                     : Colors.black,
                                           ),
@@ -345,6 +568,35 @@ class _SkillExpertiseScreenState extends State<SkillExpertiseScreen> {
                       // Continue Button
                       GestureDetector(
                         onTap: () {
+                          // Validate selections
+                          if (selectedCoreSkills.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Please select at least one core expertise'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          if (selectedExperienceLevel.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Please select your experience level'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            return;
+                          }
+                          
+                          // Save data to SignupData
+                          final signupData = SignupData.instance;
+                          signupData.selectedCoreSkills = List.from(selectedCoreSkills);
+                          signupData.selectedExperienceLevel = selectedExperienceLevel;
+                          print('✅ Skill Expertise data saved to SignupData:');
+                          print('   Core Skills: ${signupData.selectedCoreSkills}');
+                          print('   Experience Level: ${signupData.selectedExperienceLevel}');
+                          print('   Expertise String: ${signupData.getExpertiseString()}');
+                          
                           Navigator.push(
                               context,
                               MaterialPageRoute(builder: (context) => UploadCvScreen(),));

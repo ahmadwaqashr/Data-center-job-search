@@ -1,7 +1,9 @@
+import 'dart:io';
 import 'package:data_center_job/utils/custom_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:file_picker/file_picker.dart';
 
 import '../../../../constants/colors.dart';
 
@@ -16,10 +18,90 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
   String _selectedUseFor = 'Technical roles';
   String _selectedMarkAs = 'Primary';
 
-  // Hardcoded uploaded file
-  final String _fileName = 'EdgeCore_Tech_Resume.pdf';
-  final String _fileSize = '1.1 MB';
-  final String _fileType = 'PDF';
+  // Selected file
+  PlatformFile? _selectedFile;
+  File? _file;
+  
+  // CV name controller
+  final TextEditingController _cvNameController = TextEditingController(
+    text: 'Data Center Technician CV',
+  );
+
+  @override
+  void dispose() {
+    _cvNameController.dispose();
+    super.dispose();
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes < 1024) {
+      return '$bytes B';
+    } else if (bytes < 1024 * 1024) {
+      return '${(bytes / 1024).toStringAsFixed(1)} KB';
+    } else {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+  }
+
+  String _getFileType(String? extension) {
+    if (extension == null) return 'Unknown';
+    switch (extension.toLowerCase()) {
+      case 'pdf':
+        return 'PDF';
+      case 'doc':
+      case 'docx':
+        return 'DOC';
+      default:
+        return extension.toUpperCase();
+    }
+  }
+
+  Future<void> _pickFile() async {
+    print('_pickFile called'); // Debug print
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf', 'doc', 'docx'],
+        allowMultiple: false,
+      );
+
+      if (result != null && result.files.single.path != null) {
+        PlatformFile file = result.files.single;
+        
+        // Check file size (5 MB limit)
+        if (file.size > 5 * 1024 * 1024) {
+          Get.snackbar(
+            'File too large',
+            'Please select a file smaller than 5 MB',
+            snackPosition: SnackPosition.BOTTOM,
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+          );
+          return;
+        }
+
+        setState(() {
+          _selectedFile = file;
+          _file = File(file.path!);
+          // Update CV name to file name without extension
+          String fileName = file.name;
+          if (fileName.contains('.')) {
+            fileName = fileName.substring(0, fileName.lastIndexOf('.'));
+          }
+          _cvNameController.text = fileName;
+        });
+      }
+    } catch (e) {
+      print('Error picking file: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to pick file: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -174,12 +256,19 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                 ),
                                 SizedBox(height: 20.h),
                                 // Upload area
-                                Container(
+                                InkWell(
+                                  onTap: _pickFile,
+                                  borderRadius: BorderRadius.circular(12.r),
+                                  child: Container(
                                   width: double.infinity,
                                   padding: EdgeInsets.symmetric(vertical: 40.h),
                                   decoration: BoxDecoration(
                                     color: Colors.grey[50],
                                     borderRadius: BorderRadius.circular(12.r),
+                                      border: Border.all(
+                                        color: Colors.grey[300]!,
+                                        width: 1,
+                                      ),
                                   ),
                                   child: Column(
                                     children: [
@@ -205,20 +294,37 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                           color: Colors.grey[600],
                                         ),
                                       ),
-                                      SizedBox(height: 12.h),
-                                      Text(
-                                        'Choose from files',
-                                        style: TextStyle(
-                                          fontSize: 14.sp,
+                                        SizedBox(height: 20.h),
+                                        // Browse files button
+                                        Material(
                                           color: AppColors.primaryColor,
-                                          fontWeight: FontWeight.w500,
+                                          borderRadius: BorderRadius.circular(25.r),
+                                          child: InkWell(
+                                            onTap: _pickFile,
+                                            borderRadius: BorderRadius.circular(25.r),
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 24.w,
+                                                vertical: 12.h,
+                                              ),
+                                              child: Text(
+                                                'Browse files',
+                                                style: TextStyle(
+                                                  fontSize: 14.sp,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                            ),
                                         ),
                                       ),
                                     ],
+                                    ),
                                   ),
                                 ),
                                 SizedBox(height: 16.h),
                                 // Uploaded file display
+                                if (_selectedFile != null)
                                 Container(
                                   padding: EdgeInsets.all(12),
                                   decoration: BoxDecoration(
@@ -239,16 +345,18 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                               CrossAxisAlignment.start,
                                           children: [
                                             Text(
-                                              _fileName,
+                                                _selectedFile!.name,
                                               style: TextStyle(
                                                 fontSize: 14.sp,
                                                 fontWeight: FontWeight.w500,
                                                 color: Colors.black,
                                               ),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                             ),
                                             SizedBox(height: 2.h),
                                             Text(
-                                              '$_fileSize • $_fileType',
+                                                '${_formatFileSize(_selectedFile!.size)} • ${_getFileType(_selectedFile!.extension)}',
                                               style: TextStyle(
                                                 fontSize: 12.sp,
                                                 color: Colors.grey[600],
@@ -257,12 +365,23 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                           ],
                                         ),
                                       ),
-                                      Text(
+                                        TextButton(
+                                          onPressed: _pickFile,
+                                          style: TextButton.styleFrom(
+                                            padding: EdgeInsets.symmetric(
+                                              horizontal: 12.w,
+                                              vertical: 8.h,
+                                            ),
+                                            minimumSize: Size.zero,
+                                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                          ),
+                                          child: Text(
                                         'Change',
                                         style: TextStyle(
                                           fontSize: 14.sp,
                                           color: AppColors.primaryColor,
-                                          fontWeight: FontWeight.w500,
+                                              fontWeight: FontWeight.w600,
+                                            ),
                                         ),
                                       ),
                                     ],
@@ -300,9 +419,7 @@ class _UploadCvScreenState extends State<UploadCvScreen> {
                                     borderRadius: BorderRadius.circular(25.r),
                                   ),
                                   child: TextField(
-                                    controller: TextEditingController(
-                                      text: 'Data Center Technician CV',
-                                    ),
+                                    controller: _cvNameController,
                                     style: TextStyle(
                                       fontSize: 14.sp,
                                       color: Colors.black,

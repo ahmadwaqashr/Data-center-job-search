@@ -1,9 +1,19 @@
+import 'dart:convert';
 import 'package:country_code_picker/country_code_picker.dart';
 import 'package:data_center_job/view/candidate/auth/otp_verification_screen.dart';
+import 'package:data_center_job/view/candidate/auth/complete_profile_screen.dart';
+import 'package:data_center_job/view/candidate/dashboard/dashboard_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:get/get.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../constants/colors.dart';
+import '../../../constants/api_config.dart';
+import '../../../models/signup_data.dart';
 
 class PhoneAuthScreen extends StatefulWidget {
   const PhoneAuthScreen({super.key});
@@ -14,12 +24,337 @@ class PhoneAuthScreen extends StatefulWidget {
 
 class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
   final TextEditingController _phoneController = TextEditingController();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+  final GoogleSignIn _googleSignIn = GoogleSignIn();
+  final Dio _dio = Dio();
   String _countryCode = '+1';
+  bool _isLoading = false;
+  bool _isGoogleLoading = false;
+  String? _verificationId;
 
   @override
   void dispose() {
     _phoneController.dispose();
+    _dio.close();
     super.dispose();
+  }
+
+  Future<void> _sendOTP() async {
+    if (_phoneController.text.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please enter your phone number',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      String phoneNumber = _countryCode + _phoneController.text.trim();
+      
+      await _auth.verifyPhoneNumber(
+        phoneNumber: phoneNumber,
+        verificationCompleted: (PhoneAuthCredential credential) {
+          // Auto-verification completed (Android only)
+          setState(() {
+            _isLoading = false;
+          });
+        },
+        verificationFailed: (FirebaseAuthException e) {
+          setState(() {
+            _isLoading = false;
+          });
+          Get.snackbar(
+            'Verification Failed',
+            e.message ?? 'Failed to send verification code',
+            snackPosition: SnackPosition.BOTTOM,
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+          );
+        },
+        codeSent: (String verificationId, int? resendToken) {
+          setState(() {
+            _isLoading = false;
+            _verificationId = verificationId;
+          });
+          
+          // Navigate to OTP verification screen
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => OtpVerificationScreen(
+                phoneNumber: phoneNumber,
+                verificationId: verificationId,
+              ),
+            ),
+          );
+        },
+        codeAutoRetrievalTimeout: (String verificationId) {
+          _verificationId = verificationId;
+        },
+        timeout: const Duration(seconds: 60),
+      );
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      Get.snackbar(
+        'Error',
+        'Failed to send OTP: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  Future<void> _signInWithGoogle() async {
+    setState(() {
+      _isGoogleLoading = true;
+    });
+
+    try {
+      print('🔐 Starting Google Sign-In...');
+      
+      // Trigger the Google Sign-In flow
+      final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
+      
+      if (googleUser == null) {
+        // User cancelled the sign-in
+        print('⚠️ Google Sign-In cancelled by user');
+        setState(() {
+          _isGoogleLoading = false;
+        });
+        return;
+      }
+
+      print('✅ Google Sign-In successful');
+      print('   Email: ${googleUser.email}');
+      print('   Display Name: ${googleUser.displayName}');
+      print('   ID: ${googleUser.id}');
+
+      // Obtain the auth details from the request
+      final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+
+      // Create a new credential
+      final credential = GoogleAuthProvider.credential(
+        accessToken: googleAuth.accessToken,
+        idToken: googleAuth.idToken,
+      );
+
+      // Sign in to Firebase with the Google credential
+      await _auth.signInWithCredential(credential);
+      print('✅ Firebase authentication successful');
+
+      // Call login API with Google email
+      await _callGoogleLoginAPI(googleUser.email ?? '', googleUser.displayName ?? '');
+      
+    } catch (e) {
+      setState(() {
+        _isGoogleLoading = false;
+      });
+      
+      print('❌ Google Sign-In error: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to sign in with Google: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  Future<void> _callGoogleLoginAPI(String email, String displayName) async {
+    try {
+      print('🔐 Calling login API with Google credentials...');
+      print('   Email: $email');
+      print('   Role: candidate');
+      
+      // Prepare request data
+      final requestData = jsonEncode({
+        'role': 'candidate',
+        'email': email,
+      });
+
+      // Make login API call
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.candidateLogin),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        ),
+        data: requestData,
+      );
+
+      print('📥 Login API Response:');
+      print('   Status Code: ${response.statusCode}');
+      print('   Response Data: ${jsonEncode(response.data)}');
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        
+        print('✅ Login successful!');
+        print('   User ID: ${responseData['id']}');
+        print('   Email: ${responseData['email']}');
+        print('   Full Name: ${responseData['fullName']}');
+        print('   Token: ${responseData['token']?.substring(0, 20) ?? "NULL"}...');
+        
+        // Save user data to SharedPreferences
+        await _saveUserData(responseData);
+        
+        setState(() {
+          _isGoogleLoading = false;
+        });
+
+        // Navigate to dashboard
+        if (mounted) {
+          Navigator.pushAndRemoveUntil(
+            context,
+            MaterialPageRoute(builder: (context) => DashboardScreen()),
+            (route) => false, // Remove all previous routes
+          );
+        }
+      } else {
+        throw Exception('Login failed with status: ${response.statusCode}');
+      }
+    } on DioException catch (e) {
+      setState(() {
+        _isGoogleLoading = false;
+      });
+
+      print('❌ Login API Error:');
+      print('   Status Code: ${e.response?.statusCode}');
+      print('   Error: ${e.message}');
+      print('   Response: ${e.response?.data}');
+
+      // Handle 401 Unauthorized - user doesn't exist, continue with signup
+      if (e.response?.statusCode == 401) {
+        print('ℹ️ User not found (401), continuing with signup flow');
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (context) => CompleteProfileScreen()),
+          );
+        }
+        return;
+      }
+
+      // Handle 400 Bad Request - phone required (for Google login)
+      if (e.response?.statusCode == 400) {
+        final errorMessage = e.response?.data?['message']?.toString() ?? '';
+        if (errorMessage.toLowerCase().contains('phone')) {
+          print('ℹ️ Phone required (400), continuing with complete profile flow');
+          
+          // Save Google user info to SignupData for pre-filling in CompleteProfileScreen
+          try {
+            final googleUser = await _googleSignIn.signInSilently();
+            if (googleUser != null) {
+              SignupData.instance.email = googleUser.email ?? '';
+              SignupData.instance.fullName = googleUser.displayName ?? '';
+              print('✅ Saved Google user info for profile completion');
+              print('   Email: ${SignupData.instance.email}');
+              print('   Full Name: ${SignupData.instance.fullName}');
+            } else {
+              // If signInSilently fails, get from current Firebase user
+              final firebaseUser = _auth.currentUser;
+              if (firebaseUser != null) {
+                SignupData.instance.email = firebaseUser.email ?? '';
+                SignupData.instance.fullName = firebaseUser.displayName ?? '';
+                print('✅ Saved Google user info from Firebase user');
+              }
+            }
+          } catch (e) {
+            print('⚠️ Could not save Google user info: $e');
+            // Fallback: try to get from Firebase user
+            try {
+              final firebaseUser = _auth.currentUser;
+              if (firebaseUser != null) {
+                SignupData.instance.email = firebaseUser.email ?? '';
+                SignupData.instance.fullName = firebaseUser.displayName ?? '';
+                print('✅ Saved Google user info from Firebase user (fallback)');
+              }
+            } catch (e2) {
+              print('❌ Could not get user info from Firebase: $e2');
+            }
+          }
+          
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => CompleteProfileScreen()),
+            );
+          }
+          return;
+        }
+      }
+
+      // Other errors
+      Get.snackbar(
+        'Login Failed',
+        e.response?.data?['message'] ?? e.message ?? 'Failed to login. Please try again.',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    } catch (e) {
+      setState(() {
+        _isGoogleLoading = false;
+      });
+      print('❌ Unexpected error during login: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to login: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  Future<void> _saveUserData(Map<String, dynamic> userData) async {
+    try {
+      print('💾 Saving user data to SharedPreferences...');
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Save all user data as JSON
+      await prefs.setString('user_data', jsonEncode(userData));
+      print('   ✅ user_data saved');
+      
+      // Save individual important fields for easy access
+      if (userData['token'] != null) {
+        await prefs.setString('auth_token', userData['token']);
+        print('   ✅ auth_token saved');
+      }
+      if (userData['id'] != null) {
+        await prefs.setString('user_id', userData['id'].toString());
+        print('   ✅ user_id saved: ${userData['id']}');
+      }
+      if (userData['email'] != null) {
+        await prefs.setString('user_email', userData['email']);
+        print('   ✅ user_email saved: ${userData['email']}');
+      }
+      if (userData['fullName'] != null) {
+        await prefs.setString('user_name', userData['fullName']);
+        print('   ✅ user_name saved: ${userData['fullName']}');
+      }
+      if (userData['role'] != null) {
+        await prefs.setString('user_role', userData['role']);
+        print('   ✅ user_role saved: ${userData['role']}');
+      }
+      
+      print('✅ All user data saved to SharedPreferences successfully');
+    } catch (e) {
+      print('❌ Error saving user data: $e');
+    }
   }
 
   @override
@@ -212,27 +547,29 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                       SizedBox(height: 20.h),
                       // Continue Button
                       GestureDetector(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder:
-                                  (context) => OtpVerificationScreen(
-                                    phoneNumber:
-                                        _countryCode + _phoneController.text,
-                                  ),
-                            ),
-                          );
-                        },
+                        onTap: _isLoading ? null : _sendOTP,
                         child: Container(
                           width: double.infinity,
                           height: 50.h,
                           decoration: BoxDecoration(
-                            color: AppColors.primaryColor,
+                            color: _isLoading 
+                                ? AppColors.primaryColor.withOpacity(0.6)
+                                : AppColors.primaryColor,
                             borderRadius: BorderRadius.circular(25.r),
                           ),
                           alignment: Alignment.center,
-                          child: Row(
+                          child: _isLoading
+                              ? SizedBox(
+                                  width: 20.w,
+                                  height: 20.h,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                )
+                              : Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               Text(
@@ -243,10 +580,10 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                                   color: Colors.white,
                                 ),
                               ),
-                              SizedBox(width: 10..w),
+                                    SizedBox(width: 10.w),
                               Container(
-                                height: 18..h,
-                                width: 18..w,
+                                      height: 18.h,
+                                      width: 18.w,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
                                   color: Color(0xFF2052C1),
@@ -275,39 +612,52 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                       SizedBox(height: 16.h),
                       // Continue with Google Button
                       GestureDetector(
-                        onTap: () {
-                          // Google sign in
-                        },
+                        onTap: _isGoogleLoading ? null : _signInWithGoogle,
                         child: Container(
                           width: double.infinity,
                           height: 50.h,
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: _isGoogleLoading 
+                                ? Colors.grey[200]
+                                : Colors.white,
                             borderRadius: BorderRadius.circular(15.r),
                             border: Border.all(
                               color: Colors.grey[300]!,
                               width: 1,
                             ),
                           ),
-                          child: Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Image.asset(
-                                'assets/images/google.png',
-                                height: 18..h,
-                                width: 18..w,
-                              ),
-                              SizedBox(width: 12.w),
-                              Text(
-                                'Continue with Google',
-                                style: TextStyle(
-                                  fontSize: 15.sp,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.black,
+                          child: _isGoogleLoading
+                              ? Center(
+                                  child: SizedBox(
+                                    width: 20.w,
+                                    height: 20.h,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                        Colors.grey[600]!,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Image.asset(
+                                      'assets/images/google.png',
+                                      height: 18.h,
+                                      width: 18.w,
+                                    ),
+                                    SizedBox(width: 12.w),
+                                    Text(
+                                      'Continue with Google',
+                                      style: TextStyle(
+                                        fontSize: 15.sp,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.black,
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                            ],
-                          ),
                         ),
                       ),
                       SizedBox(height: 12.h),
@@ -332,8 +682,8 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                             children: [
                               Image.asset(
                                 'assets/images/apple.png',
-                                height: 18..h,
-                                width: 18..w,
+                                height: 18.h,
+                                width: 18.w,
                               ),
                               SizedBox(width: 12.w),
                               Text(
@@ -371,7 +721,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                           ),
                         ),
                       ),
-                      SizedBox(height: 65..h),
+                      SizedBox(height: 65.h),
                       // Terms and Privacy text
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -384,7 +734,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
                           ),
                         ),
                       ),
-                      SizedBox(height: 10..h),
+                      SizedBox(height: 10.h),
                     ],
                   ),
                 ),

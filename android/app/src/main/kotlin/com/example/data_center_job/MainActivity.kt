@@ -1,4 +1,4 @@
-package com.example.data_center_job
+package com.highapp.data_center_job
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "894901002576",
+    "project_id": "data-center-job-search",
+    "storage_bucket": "data-center-job-search.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:894901002576:android:5af0c0ec6c600f198a8c55",
+        "android_client_info": {
+          "package_name": "com.highapp.data_center_job"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "894901002576-4tnqcf7n2hsev8cug8amj3hl3gkilagn.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.highapp.data_center_job",
+            "certificate_hash": "ec2a56fe6aa55a9f5075adb5cc2ac01bf1e039c4"
+          }
+        },
+        {
+          "client_id": "894901002576-opbhetq5u50339e27mogkhm834be6prg.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAAQwiBpar_s7xZ__NY4iUx3XuaHLd0HII"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "894901002576-opbhetq5u50339e27mogkhm834be6prg.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "894901002576-ucom702fd90ce3q6s04l16047fn3916a.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.highapp.data.center.job"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

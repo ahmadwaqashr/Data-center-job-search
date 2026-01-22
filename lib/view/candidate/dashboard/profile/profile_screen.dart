@@ -1,20 +1,474 @@
+import 'dart:convert';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:get/get.dart';
+import 'package:get/get.dart' hide FormData;
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import 'edit_profile_screen.dart';
 import 'skills_preferences_screen.dart';
 import 'edit_experience_screen.dart';
 import 'upload_cv_screen.dart';
 import 'upload_id_screen.dart';
 import '../../test/skill_test_screen.dart';
+import '../../../splash/splash0.dart';
 
-class ProfileScreen extends StatelessWidget {
+class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
   @override
+  State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends State<ProfileScreen> {
+  Map<String, dynamic>? _userData;
+  bool _isLoading = true;
+  List<Map<String, dynamic>> _experiences = [];
+  bool _isLoadingExperiences = true;
+  Map<String, dynamic>? _skillsPreferences;
+  bool _isLoadingSkillsPreferences = true;
+  final Dio _dio = Dio();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAllData();
+  }
+
+  Future<void> _loadAllData() async {
+    await Future.wait([
+      _loadUserData(),
+      _fetchExperiences(),
+      _fetchSkillsPreferences(),
+    ]);
+  }
+
+  // Method to reload all data (called when returning from child screens)
+  void _reloadAllData() {
+    if (mounted) {
+      _loadAllData();
+    }
+  }
+
+  Future<void> _loadUserData() async {
+    try {
+      print('📥 Loading user data from SharedPreferences...');
+      final prefs = await SharedPreferences.getInstance();
+      
+      final userDataString = prefs.getString('user_data');
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+        print('✅ User data loaded:');
+        print('   Full Name: ${userData['fullName']}');
+        print('   Email: ${userData['email']}');
+        print('   Phone: ${userData['phone']}');
+        print('   Location: ${userData['location']}');
+        print('   Profile Pic: ${userData['profilePic']}');
+        print('   Percentage: ${userData['percentage']}');
+        print('   Experties: ${userData['experties']}');
+        print('   Experienced: ${userData['experienced']}');
+        
+        setState(() {
+          _userData = userData;
+          _isLoading = false;
+        });
+      } else {
+        print('⚠️ No user data found in SharedPreferences');
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error loading user data: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _fetchExperiences() async {
+    try {
+      setState(() {
+        _isLoadingExperiences = true;
+      });
+
+      // Get token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final userDataString = prefs.getString('user_data');
+      String? token;
+
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+        token = userData['token']?.toString();
+      }
+
+      if (token == null || token.isEmpty) {
+        print('⚠️ No authentication token found');
+        setState(() {
+          _experiences = [];
+          _isLoadingExperiences = false;
+        });
+        return;
+      }
+
+      print('📥 Fetching experiences from API...');
+
+      // Make API call
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchExperiences),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: '', // Empty string as per API requirement
+      );
+
+      if (response.statusCode == 200) {
+        print('✅ Experiences fetched successfully');
+        print('   Response: ${jsonEncode(response.data)}');
+
+        final responseData = response.data as Map<String, dynamic>;
+        List<Map<String, dynamic>> experiences = [];
+
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final dataList = responseData['data'] as List;
+          
+          for (var item in dataList) {
+            final exp = item as Map<String, dynamic>;
+            
+            // Parse dates
+            DateTime? startDateObj;
+            DateTime? endDateObj;
+            bool isPresent = false;
+
+            if (exp['startDate'] != null) {
+              try {
+                startDateObj = DateTime.parse(exp['startDate'].toString());
+              } catch (e) {
+                print('⚠️ Error parsing startDate: $e');
+              }
+            }
+
+            if (exp['endDate'] != null) {
+              final endDateStr = exp['endDate'].toString().toLowerCase();
+              if (endDateStr == 'present') {
+                isPresent = true;
+              } else {
+                try {
+                  endDateObj = DateTime.parse(exp['endDate'].toString());
+                } catch (e) {
+                  print('⚠️ Error parsing endDate: $e');
+                }
+              }
+            } else {
+              isPresent = exp['isPresent'] ?? false;
+            }
+
+            if (startDateObj != null) {
+              // Get job type from API response and format it
+              String jobType = exp['jobType']?.toString() ?? 'Full-time';
+              // Capitalize first letter of each word
+              jobType = jobType.split(' ').map((word) {
+                if (word.isEmpty) return word;
+                return word[0].toUpperCase() + word.substring(1).toLowerCase();
+              }).join(' ');
+
+              experiences.add({
+                'title': exp['title']?.toString() ?? '',
+                'company': exp['company']?.toString() ?? '',
+                'jobType': jobType,
+                'location': exp['location']?.toString() ?? '',
+                'startDate': startDateObj,
+                'endDate': endDateObj,
+                'isPresent': isPresent,
+              });
+            }
+          }
+
+          // Sort by start date (most recent first)
+          experiences.sort((a, b) {
+            final aDate = a['startDate'] as DateTime;
+            final bDate = b['startDate'] as DateTime;
+            return bDate.compareTo(aDate);
+          });
+
+          setState(() {
+            _experiences = experiences;
+            _isLoadingExperiences = false;
+          });
+        } else {
+          setState(() {
+            _experiences = [];
+            _isLoadingExperiences = false;
+          });
+        }
+      } else {
+        throw Exception('Failed to fetch experiences: ${response.statusMessage}');
+      }
+    } catch (e) {
+      print('❌ Error fetching experiences: $e');
+      setState(() {
+        _experiences = [];
+        _isLoadingExperiences = false;
+      });
+    }
+  }
+
+  Future<void> _fetchSkillsPreferences() async {
+    try {
+      setState(() {
+        _isLoadingSkillsPreferences = true;
+      });
+
+      // Get token from SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      final userDataString = prefs.getString('user_data');
+      String? token;
+
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+        token = userData['token']?.toString();
+      }
+
+      if (token == null || token.isEmpty) {
+        print('⚠️ No authentication token found');
+        setState(() {
+          _skillsPreferences = null;
+          _isLoadingSkillsPreferences = false;
+        });
+        return;
+      }
+
+      print('📥 Fetching skills preferences from API...');
+
+      // Make API call
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchSkillsPreferences),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: '', // Empty string as per API requirement
+      );
+
+      if (response.statusCode == 200) {
+        print('✅ Skills preferences fetched successfully');
+        print('   Response: ${jsonEncode(response.data)}');
+
+        final responseData = response.data as Map<String, dynamic>;
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final dataList = responseData['data'] as List;
+          if (dataList.isNotEmpty) {
+            // Get the first (most recent) skills preferences
+            final skillsData = dataList[0] as Map<String, dynamic>;
+            setState(() {
+              _skillsPreferences = skillsData;
+              _isLoadingSkillsPreferences = false;
+            });
+          } else {
+            setState(() {
+              _skillsPreferences = null;
+              _isLoadingSkillsPreferences = false;
+            });
+          }
+        } else {
+          setState(() {
+            _skillsPreferences = null;
+            _isLoadingSkillsPreferences = false;
+          });
+        }
+      } else {
+        throw Exception('Failed to fetch skills preferences: ${response.statusMessage}');
+      }
+    } catch (e) {
+      print('❌ Error fetching skills preferences: $e');
+      setState(() {
+        _skillsPreferences = null;
+        _isLoadingSkillsPreferences = false;
+      });
+    }
+  }
+
+  String _formatWorkPreferences(Map<String, dynamic> skillsData) {
+    List<String> parts = [];
+    
+    // Add availability
+    if (skillsData['availability'] != null) {
+      parts.add(skillsData['availability'].toString());
+    }
+    
+    // Add preferred name (role focus)
+    if (skillsData['preferredName'] != null) {
+      parts.add(skillsData['preferredName'].toString());
+    }
+    
+    // Add work style
+    if (skillsData['workStyle'] != null) {
+      parts.add(skillsData['workStyle'].toString());
+    }
+    
+    // Add locations if available
+    if (skillsData['location'] != null && skillsData['location'] is List) {
+      final locations = skillsData['location'] as List;
+      if (locations.isNotEmpty) {
+        final locationStr = locations.join(', ');
+        parts.add(locationStr);
+      }
+    }
+    
+    return parts.isNotEmpty ? parts.join(' • ') : 'Not set';
+  }
+
+  String _formatCoreSkills(dynamic coreName) {
+    if (coreName == null) return 'Not set';
+    
+    if (coreName is List) {
+      if (coreName.isEmpty) return 'Not set';
+      return coreName.map((item) => item.toString()).join(', ');
+    }
+    
+    return coreName.toString();
+  }
+
+  String _getMonthName(int month) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    return months[month - 1];
+  }
+
+  Future<void> _handleLogout(BuildContext context) async {
+    // Show confirmation dialog
+    final shouldLogout = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(
+            'Log Out',
+            style: TextStyle(
+              fontSize: 18.sp,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Text(
+            'Are you sure you want to log out?',
+            style: TextStyle(
+              fontSize: 14.sp,
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(false);
+              },
+              child: Text(
+                'Cancel',
+                style: TextStyle(
+                  fontSize: 14.sp,
+                  color: Colors.grey[600],
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(true);
+              },
+              child: Text(
+                'Log Out',
+                style: TextStyle(
+                  fontSize: 14.sp,
+                  color: Colors.red,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (shouldLogout != true) {
+      return;
+    }
+
+    try {
+      print('🚪 Logging out user...');
+      
+      // Sign out from Firebase Auth
+      try {
+        await FirebaseAuth.instance.signOut();
+        print('✅ Signed out from Firebase Auth');
+      } catch (e) {
+        print('⚠️ Firebase sign out error: $e');
+      }
+
+      // Clear SharedPreferences
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Clear all user-related data
+      await prefs.remove('user_data');
+      await prefs.remove('auth_token');
+      await prefs.remove('user_id');
+      await prefs.remove('user_email');
+      await prefs.remove('user_name');
+      await prefs.remove('user_role');
+      
+      print('✅ Cleared all SharedPreferences data');
+      print('✅ Logout successful');
+
+      // Navigate to splash screen (which will check auth and route accordingly)
+      if (context.mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (context) => Splash0()),
+          (route) => false, // Remove all previous routes
+        );
+      }
+    } catch (e) {
+      print('❌ Error during logout: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error logging out: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return SafeArea(
+        child: Scaffold(
+          backgroundColor: Color(0xFFF9FAFB),
+          body: Center(
+            child: CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.primaryColor),
+            ),
+          ),
+        ),
+      );
+    }
+
     return SafeArea(
       child: Scaffold(
         backgroundColor: Color(0xFFF9FAFB),
@@ -80,28 +534,34 @@ class ProfileScreen extends StatelessWidget {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Profile',
-                                style: TextStyle(
-                                  fontSize: 16.sp,
-                                  color: Colors.grey[600],
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Profile',
+                                  style: TextStyle(
+                                    fontSize: 16.sp,
+                                    color: Colors.grey[600],
+                                  ),
                                 ),
-                              ),
-                              SizedBox(height: 4.h),
-                              Text(
-                                'Alex Johnson',
-                                style: TextStyle(
-                                  fontSize: 28.sp,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black,
+                                SizedBox(height: 4.h),
+                                Text(
+                                  _userData?['fullName'] ?? 'Loading...',
+                                  style: TextStyle(
+                                    fontSize: 28.sp,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.black,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
+                          SizedBox(width: 12.w),
                           Row(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
                               Container(
                                 width: 45.w,
@@ -119,9 +579,17 @@ class ProfileScreen extends StatelessWidget {
                               SizedBox(width: 12.w),
                               CircleAvatar(
                                 radius: 24.r,
-                                backgroundImage: AssetImage(
-                                  'assets/images/avatar1.png',
-                                ),
+                                backgroundImage: _userData?['profilePic'] != null
+                                    ? NetworkImage(
+                                        ApiConfig.getImageUrl(_userData!['profilePic']),
+                                      ) as ImageProvider
+                                    : AssetImage('assets/images/avatar1.png') as ImageProvider,
+                                onBackgroundImageError: (exception, stackTrace) {
+                                  // Fallback handled by CircleAvatar
+                                },
+                                child: _userData?['profilePic'] == null
+                                    ? null
+                                    : null,
                               ),
                             ],
                           ),
@@ -140,10 +608,6 @@ class ProfileScreen extends StatelessWidget {
                           ),
                           borderRadius: BorderRadius.circular(20.r),
                         ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
@@ -156,7 +620,7 @@ class ProfileScreen extends StatelessWidget {
                                   ),
                                   SizedBox(height: 8.h),
                                   Text(
-                                    '72% complete',
+                              '${_userData?['percentage'] ?? 0}% complete',
                                     style: TextStyle(
                                       fontSize: 24.sp,
                                       fontWeight: FontWeight.bold,
@@ -185,11 +649,14 @@ class ProfileScreen extends StatelessWidget {
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Text(
-                                          '+18% visibility when profile is complete',
-                                          style: TextStyle(
-                                            fontSize: 10.sp,
-                                            color: Colors.white,
+                                        Flexible(
+                                          child: Text(
+                                            '+18% visibility when profile is complete',
+                                            style: TextStyle(
+                                              fontSize: 10.sp,
+                                              color: Colors.white,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
                                           ),
                                         ),
                                         SizedBox(width: 6.w),
@@ -203,29 +670,6 @@ class ProfileScreen extends StatelessWidget {
                                         ),
                                       ],
                                     ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            SizedBox(width: 12.w),
-                            Column(
-                              children: [
-                                SizedBox(height: 15..h),
-                                Container(
-                                  width: 70.w,
-                                  height: 70.h,
-                                  decoration: BoxDecoration(
-                                    color: Colors.transparent,
-                                    borderRadius: BorderRadius.circular(16.r),
-                                    image: DecorationImage(
-                                      image: AssetImage(
-                                        'assets/images/profile1.png',
-                                      ),
-                                      fit: BoxFit.fill,
-                                    ),
-                                  ),
-                                ),
-                              ],
                             ),
                           ],
                         ),
@@ -253,8 +697,18 @@ class ProfileScreen extends StatelessWidget {
                                   ),
                                 ),
                                 GestureDetector(
-                                  onTap: () {
-                                    Get.to(() => const EditProfileScreen());
+                                  onTap: () async {
+                                    // Navigate to edit screen and wait for result
+                                    final result = await Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => const EditProfileScreen(),
+                                      ),
+                                    );
+                                    // Reload all data when returning (real-time update)
+                                    if (result == true) {
+                                      _loadAllData();
+                                    }
                                   },
                                   child: Text(
                                     'Edit',
@@ -279,25 +733,25 @@ class ProfileScreen extends StatelessWidget {
                             _buildContactItem(
                               icon: Icons.person_outline,
                               label: 'Full name',
-                              value: 'Alex Johnson',
+                              value: _userData?['fullName'] ?? 'Not set',
                             ),
                             SizedBox(height: 12.h),
                             _buildContactItem(
                               icon: Icons.email_outlined,
                               label: 'Email',
-                              value: 'alex.johnson@example.com',
+                              value: _userData?['email'] ?? 'Not set',
                             ),
                             SizedBox(height: 12.h),
                             _buildContactItem(
                               icon: Icons.phone_outlined,
                               label: 'Phone number',
-                              value: '+1 (206) 555-0134',
+                              value: _userData?['phone'] ?? 'Not set',
                             ),
                             SizedBox(height: 12.h),
                             _buildContactItem(
                               icon: Icons.location_on_outlined,
                               label: 'Location',
-                              value: 'Seattle, WA',
+                              value: _userData?['location'] ?? 'Not set',
                               subtitle: 'Open to roles within 25 miles radius',
                               showBadge: true,
                             ),
@@ -364,12 +818,15 @@ class ProfileScreen extends StatelessWidget {
                                               ),
                                             ),
                                             SizedBox(width: 6.w),
-                                            Text(
-                                              'New today',
-                                              style: TextStyle(
-                                                fontSize: 13.sp,
-                                                color: Color(0xFF10B981),
-                                                fontWeight: FontWeight.w500,
+                                            Flexible(
+                                              child: Text(
+                                                'New today',
+                                                style: TextStyle(
+                                                  fontSize: 13.sp,
+                                                  color: Color(0xFF10B981),
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                           ],
@@ -409,12 +866,15 @@ class ProfileScreen extends StatelessWidget {
                                               ),
                                             ),
                                             SizedBox(width: 6.w),
-                                            Text(
-                                              'In review',
-                                              style: TextStyle(
-                                                fontSize: 13.sp,
-                                                color: Color(0xFF2563EB),
-                                                fontWeight: FontWeight.w500,
+                                            Flexible(
+                                              child: Text(
+                                                'In review',
+                                                style: TextStyle(
+                                                  fontSize: 13.sp,
+                                                  color: Color(0xFF2563EB),
+                                                  fontWeight: FontWeight.w500,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
                                               ),
                                             ),
                                           ],
@@ -451,8 +911,18 @@ class ProfileScreen extends StatelessWidget {
                                   ),
                                 ),
                                 GestureDetector(
-                                  onTap: () {
-                                    Get.to(() => const EditExperienceScreen());
+                                  onTap: () async {
+                                    // Navigate to edit experience screen and wait for result
+                                    final result = await Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => const EditExperienceScreen(),
+                                      ),
+                                    );
+                                    // Reload all data when returning (real-time update)
+                                    if (result == true) {
+                                      _loadAllData();
+                                    }
                                   },
                                   child: Text(
                                     'Edit',
@@ -474,26 +944,59 @@ class ProfileScreen extends StatelessWidget {
                               ),
                             ),
                             SizedBox(height: 16.h),
-                            _buildExperienceItem(
-                              icon: Icons.business_outlined,
-                              title: 'Data Center Technician',
-                              company: 'EdgeCore Systems • Full-time',
-                              duration: 'Jan 2022 – Present • Seattle, WA',
-                            ),
-                            SizedBox(height: 16.h),
-                            _buildExperienceItem(
-                              icon: Icons.work_outline,
-                              title: 'Junior Field Technician',
-                              company: 'MetroNet Services • Shift-based',
-                              duration: 'Aug 2018 – Jun 2020 • Tacoma, WA',
-                            ),
-                            SizedBox(height: 16.h),
-                            _buildExperienceItem(
-                              icon: Icons.business_center_outlined,
-                              title: 'Infrastructure Support Specialist',
-                              company: 'Northbridge Cloud • Contract',
-                              duration: 'Jul 2020 – Dec 2021 • Remote / Hybrid',
-                            ),
+                            // Experience list
+                            _isLoadingExperiences
+                                ? Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.symmetric(vertical: 20.h),
+                                      child: CircularProgressIndicator(),
+                                    ),
+                                  )
+                                : _experiences.isEmpty
+                                    ? Center(
+                                        child: Padding(
+                                          padding: EdgeInsets.symmetric(vertical: 20.h),
+                                          child: Text(
+                                            'No experiences yet. Add your first experience!',
+                                            style: TextStyle(
+                                              fontSize: 14.sp,
+                                              color: Colors.grey[600],
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    : Column(
+                                        children: [
+                                          ..._experiences.asMap().entries.map((entry) {
+                                            final exp = entry.value;
+                                            final startDate = exp['startDate'] as DateTime;
+                                            final endDate = exp['endDate'] as DateTime?;
+                                            final isPresent = exp['isPresent'] as bool;
+                                            
+                                            String startDateStr = '${_getMonthName(startDate.month)} ${startDate.year}';
+                                            String endDateStr = isPresent
+                                                ? 'Present'
+                                                : (endDate != null
+                                                    ? '${_getMonthName(endDate.month)} ${endDate.year}'
+                                                    : 'Present');
+                                            String duration = '$startDateStr – $endDateStr • ${exp['location']}';
+                                            
+                                            return Column(
+                                              children: [
+                                                if (entry.key > 0) SizedBox(height: 16.h),
+                                                _buildExperienceItem(
+                                                  icon: isPresent
+                                                      ? Icons.business_outlined
+                                                      : Icons.work_outline,
+                                                  title: exp['title'] ?? '',
+                                                  company: '${exp['company']} • ${exp['jobType']}',
+                                                  duration: duration,
+                                                ),
+                                              ],
+                                            );
+                                          }).toList(),
+                                        ],
+                                      ),
                           ],
                         ),
                       ),
@@ -520,10 +1023,18 @@ class ProfileScreen extends StatelessWidget {
                                   ),
                                 ),
                                 GestureDetector(
-                                  onTap: () {
-                                    Get.to(
-                                      () => const SkillsPreferencesScreen(),
+                                  onTap: () async {
+                                    // Navigate to skills preferences screen and wait for result
+                                    final result = await Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => const SkillsPreferencesScreen(),
+                                      ),
                                     );
+                                    // Reload all data when returning (real-time update)
+                                    if (result == true) {
+                                      _loadAllData();
+                                    }
                                   },
                                   child: Text(
                                     'Manage',
@@ -548,21 +1059,35 @@ class ProfileScreen extends StatelessWidget {
                             _buildSkillItem(
                               icon: Icons.build_outlined,
                               label: 'Key skills',
-                              value:
-                                  'Data center ops, Rack & cable, Incident response',
+                              value: _isLoadingSkillsPreferences
+                                  ? 'Loading...'
+                                  : _skillsPreferences != null && _skillsPreferences!['coreName'] != null
+                                      ? _formatCoreSkills(_skillsPreferences!['coreName'])
+                                      : (_userData?['experties'] != null && _userData!['experties'].toString().isNotEmpty
+                                          ? _userData!['experties'].toString()
+                                          : 'Not set'),
                             ),
                             SizedBox(height: 12.h),
                             _buildSkillItem(
                               icon: Icons.business_outlined,
-                              label: 'Preferred roles',
-                              value: 'Data Center Technician, NOC Technician',
+                              label: 'Experience level',
+                              value: _isLoadingSkillsPreferences
+                                  ? 'Loading...'
+                                  : _skillsPreferences != null && _skillsPreferences!['preferredName'] != null
+                                      ? _skillsPreferences!['preferredName'].toString()
+                                      : (_userData?['experienced'] != null && _userData!['experienced'].toString().isNotEmpty
+                                          ? _userData!['experienced'].toString()
+                                          : 'Not set'),
                             ),
                             SizedBox(height: 12.h),
                             _buildSkillItem(
                               icon: Icons.schedule_outlined,
                               label: 'Work preferences',
-                              value:
-                                  'Full-time • Shift-based • On-site or hybrid',
+                              value: _isLoadingSkillsPreferences
+                                  ? 'Loading...'
+                                  : _skillsPreferences != null
+                                      ? _formatWorkPreferences(_skillsPreferences!)
+                                      : 'Not set',
                             ),
                           ],
                         ),
@@ -631,7 +1156,7 @@ class ProfileScreen extends StatelessWidget {
                             SizedBox(height: 10.h),
                             GestureDetector(
                               onTap: () {
-
+                                _handleLogout(context);
                               },
                               child: Container(
                                 width: double.infinity,
@@ -710,12 +1235,16 @@ class ProfileScreen extends StatelessWidget {
                   fontWeight: FontWeight.w500,
                   color: Colors.black,
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
               ),
               if (subtitle != null) ...[
                 SizedBox(height: 2.h),
                 Text(
                   subtitle,
                   style: TextStyle(fontSize: 12.sp, color: Colors.grey[600]),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
                 ),
               ],
             ],
@@ -766,6 +1295,8 @@ class ProfileScreen extends StatelessWidget {
               Text(
                 title,
                 style: TextStyle(fontSize: 14.sp, color: Colors.grey[700]),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
               SizedBox(height: 4.h),
               Text(
@@ -775,11 +1306,15 @@ class ProfileScreen extends StatelessWidget {
                   fontWeight: FontWeight.w500,
                   color: Colors.black,
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
               SizedBox(height: 2.h),
               Text(
                 duration,
                 style: TextStyle(fontSize: 13.sp, color: Colors.grey[600]),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ],
           ),
@@ -821,6 +1356,8 @@ class ProfileScreen extends StatelessWidget {
                   fontWeight: FontWeight.w500,
                   color: Colors.black,
                 ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 2,
               ),
             ],
           ),
