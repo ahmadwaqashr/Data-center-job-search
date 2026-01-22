@@ -14,6 +14,8 @@ class ApiConfig {
   static const String fetchPreferredRoles = '/api/preferredrole/fetch_preferred';
   static const String addSkills = '/api/skills/add_skills';
   static const String fetchSkillsPreferences = '/api/skills/fetch_skills_prefrences';
+  static const String sendEmailOTP = '/api/auth/send-email-otp';
+  static const String verifyEmailOTP = '/api/auth/verify-email-otp';
   
   // Helper method to get edit skills URL with ID
   static String getEditSkillsUrl(int id) {

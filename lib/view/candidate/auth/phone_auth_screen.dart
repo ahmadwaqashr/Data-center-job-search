@@ -177,11 +177,14 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       print('   Email: $email');
       print('   Role: candidate');
       
-      // Prepare request data
+      // Prepare request data - for Google login, send email in "phone" field
+      // Format: {"role": "candidate", "phone": "email"}
       final requestData = jsonEncode({
         'role': 'candidate',
-        'email': email,
+        'phone': email, // Send email in phone field for Google login
       });
+      
+      print('📤 Request data: $requestData');
 
       // Make login API call
       final response = await _dio.request(
@@ -202,7 +205,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       if (response.statusCode == 200) {
         final responseData = response.data;
         
-        print('✅ Login successful!');
+        print('✅ Login successful! User exists.');
         print('   User ID: ${responseData['id']}');
         print('   Email: ${responseData['email']}');
         print('   Full Name: ${responseData['fullName']}');
@@ -215,7 +218,7 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
           _isGoogleLoading = false;
         });
 
-        // Navigate to dashboard
+        // Navigate to dashboard - user exists
         if (mounted) {
           Navigator.pushAndRemoveUntil(
             context,
@@ -236,87 +239,58 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       print('   Error: ${e.message}');
       print('   Response: ${e.response?.data}');
 
-      // Handle 401 Unauthorized - user doesn't exist, continue with signup
-      if (e.response?.statusCode == 401) {
-        print('ℹ️ User not found (401), continuing with signup flow');
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => CompleteProfileScreen()),
-          );
+      // Save Google user info to SignupData for pre-filling in CompleteProfileScreen
+      try {
+        final googleUser = await _googleSignIn.signInSilently();
+        if (googleUser != null) {
+          SignupData.instance.email = googleUser.email ?? email;
+          SignupData.instance.fullName = googleUser.displayName ?? displayName;
+          print('✅ Saved Google user info for profile completion');
+          print('   Email: ${SignupData.instance.email}');
+          print('   Full Name: ${SignupData.instance.fullName}');
+        } else {
+          // If signInSilently fails, use provided values
+          SignupData.instance.email = email;
+          SignupData.instance.fullName = displayName;
+          print('✅ Saved Google user info from parameters');
         }
-        return;
+      } catch (e) {
+        print('⚠️ Could not save Google user info: $e');
+        // Fallback: use provided values
+        SignupData.instance.email = email;
+        SignupData.instance.fullName = displayName;
+        print('✅ Saved Google user info from parameters (fallback)');
       }
 
-      // Handle 400 Bad Request - phone required (for Google login)
-      if (e.response?.statusCode == 400) {
-        final errorMessage = e.response?.data?['message']?.toString() ?? '';
-        if (errorMessage.toLowerCase().contains('phone')) {
-          print('ℹ️ Phone required (400), continuing with complete profile flow');
-          
-          // Save Google user info to SignupData for pre-filling in CompleteProfileScreen
-          try {
-            final googleUser = await _googleSignIn.signInSilently();
-            if (googleUser != null) {
-              SignupData.instance.email = googleUser.email ?? '';
-              SignupData.instance.fullName = googleUser.displayName ?? '';
-              print('✅ Saved Google user info for profile completion');
-              print('   Email: ${SignupData.instance.email}');
-              print('   Full Name: ${SignupData.instance.fullName}');
-            } else {
-              // If signInSilently fails, get from current Firebase user
-              final firebaseUser = _auth.currentUser;
-              if (firebaseUser != null) {
-                SignupData.instance.email = firebaseUser.email ?? '';
-                SignupData.instance.fullName = firebaseUser.displayName ?? '';
-                print('✅ Saved Google user info from Firebase user');
-              }
-            }
-          } catch (e) {
-            print('⚠️ Could not save Google user info: $e');
-            // Fallback: try to get from Firebase user
-            try {
-              final firebaseUser = _auth.currentUser;
-              if (firebaseUser != null) {
-                SignupData.instance.email = firebaseUser.email ?? '';
-                SignupData.instance.fullName = firebaseUser.displayName ?? '';
-                print('✅ Saved Google user info from Firebase user (fallback)');
-              }
-            } catch (e2) {
-              print('❌ Could not get user info from Firebase: $e2');
-            }
-          }
-          
-          if (mounted) {
-            Navigator.pushReplacement(
-              context,
-              MaterialPageRoute(builder: (context) => CompleteProfileScreen()),
-            );
-          }
-          return;
-        }
+      // Handle any error (401, 400, etc.) - user doesn't exist, navigate to complete profile
+      print('ℹ️ User does not exist or error occurred, navigating to complete profile...');
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => CompleteProfileScreen()),
+        );
       }
-
-      // Other errors
-      Get.snackbar(
-        'Login Failed',
-        e.response?.data?['message'] ?? e.message ?? 'Failed to login. Please try again.',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
     } catch (e) {
       setState(() {
         _isGoogleLoading = false;
       });
       print('❌ Unexpected error during login: $e');
-      Get.snackbar(
-        'Error',
-        'Failed to login: ${e.toString()}',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
+      
+      // Save Google user info even on unexpected error
+      try {
+        SignupData.instance.email = email;
+        SignupData.instance.fullName = displayName;
+      } catch (e2) {
+        print('⚠️ Could not save user info: $e2');
+      }
+      
+      // Navigate to complete profile on any error
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => CompleteProfileScreen()),
+        );
+      }
     }
   }
 

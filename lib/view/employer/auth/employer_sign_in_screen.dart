@@ -236,10 +236,24 @@ class _EmployerSignInScreenState extends State<EmployerSignInScreen> {
                                 SizedBox(height: 16.h),
                                 // Continue with email button
                                 GestureDetector(
-                                  onTap: () {
+                                  onTap: () async {
+                                    // Validate email
+                                    final email = _emailController.text.trim();
+                                    if (email.isEmpty || !email.contains('@')) {
+                                      Get.snackbar(
+                                        'Error',
+                                        'Please enter a valid email address',
+                                        snackPosition: SnackPosition.BOTTOM,
+                                        backgroundColor: Colors.red,
+                                        colorText: Colors.white,
+                                      );
+                                      return;
+                                    }
+                                    
+                                    // Navigate to email verification screen
                                     Get.to(
                                       () => EmployerEmailVerificationScreen(
-                                        email: _emailController.text,
+                                        email: email,
                                       ),
                                     );
                                   },

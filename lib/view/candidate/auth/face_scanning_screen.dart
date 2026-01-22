@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:get/get.dart' hide FormData, MultipartFile;
 import 'package:dio/dio.dart';
@@ -64,33 +66,87 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
+    print('🧹 Disposing FaceScanningScreen...');
+    // Cancel all timers first
     _timer?.cancel();
     _faceDetectionTimer?.cancel();
+    
+    // Stop animation
+    _animationController.stop();
     _animationController.dispose();
+    
+    // Set scanning complete to prevent any further operations
+    _isScanningComplete = true;
+    _isProcessingFrame = false;
+    
+    // Stop image stream if running
+    try {
+      if (_cameraController != null && _cameraController!.value.isStreamingImages) {
+        _cameraController!.stopImageStream();
+      }
+    } catch (e) {
+      print('⚠️ Error stopping image stream: $e');
+    }
+    
+    // Dispose camera controller
     _cameraController?.dispose();
+    _cameraController = null;
+    
+    // Close other resources
     _faceDetector.close();
     _dio.close();
+    
+    // Remove observer
+    WidgetsBinding.instance.removeObserver(this);
+    
     super.dispose();
+    print('✅ FaceScanningScreen disposed');
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     print('🔄 App lifecycle state changed: $state');
-    if (state == AppLifecycleState.inactive) {
-      _cameraController?.dispose();
+    if (state == AppLifecycleState.inactive || state == AppLifecycleState.paused) {
+      // Cancel timers first
+      _timer?.cancel();
+      _faceDetectionTimer?.cancel();
+      
+      // Stop image stream if running
+      if (_cameraController != null && _cameraController!.value.isStreamingImages) {
+        _cameraController!.stopImageStream().catchError((e) {
+          print('⚠️ Error stopping image stream on pause: $e');
+        });
+      }
+      
+      // Dispose camera when app goes to background to prevent crashes
+      try {
+        if (_cameraController != null) {
+          _cameraController!.dispose();
+          _cameraController = null;
+        }
+      } catch (e) {
+        print('⚠️ Error disposing camera on pause: $e');
+      }
       if (mounted) {
         setState(() {
           _isCameraInitialized = false;
+          _isProcessingFrame = false;
         });
       }
     } else if (state == AppLifecycleState.resumed) {
       // Recheck permission and reinitialize camera when app resumes
       // This handles the case when user grants permission from settings
       print('🔄 App resumed, rechecking camera permission...');
-      // Add a small delay to ensure the app is fully resumed
-      Future.delayed(Duration(milliseconds: 500), () {
-        if (mounted) {
+      // Reset permission denied state first
+      if (mounted) {
+        setState(() {
+          _isPermissionDenied = false;
+        });
+      }
+      // Add a longer delay to ensure the app is fully resumed and permission status is updated
+      // iOS sometimes needs more time to update permission status after returning from Settings
+      Future.delayed(Duration(milliseconds: 1000), () {
+        if (mounted && !_isScanningComplete) {
           _initializeCamera();
         }
       });
@@ -98,140 +154,204 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
   }
 
   Future<void> _initializeCamera() async {
-    // Check current camera permission status
+    // Force a fresh permission status check (iOS sometimes caches the status)
+    // First, check the current status
     PermissionStatus status = await Permission.camera.status;
     
-    print('📷 Camera permission status: $status');
+    print('📷 Camera permission status (initial check): $status');
     print('   isGranted: ${status.isGranted}');
     print('   isDenied: ${status.isDenied}');
     print('   isPermanentlyDenied: ${status.isPermanentlyDenied}');
     print('   isRestricted: ${status.isRestricted}');
     
-    // If permission is not granted, request it
-    if (!status.isGranted) {
+    bool canProceedToCamera = false;
+    
+    // If permission is granted, proceed directly to camera initialization
+    if (status.isGranted) {
+      print('✅ Camera permission already granted');
+      canProceedToCamera = true;
+    } else {
+      // Permission is not granted
       // Check if permanently denied first
       if (status.isPermanentlyDenied) {
-        // Permission is permanently denied, user must enable in settings
-        print('❌ Camera permission permanently denied - must open settings');
-        if (mounted) {
-          setState(() {
-            _isPermissionDenied = true;
-            _isCameraInitialized = false;
-          });
-          // Show dialog after a short delay to ensure UI is updated
-          Future.delayed(Duration(milliseconds: 300), () {
-            if (mounted) {
-              _showPermissionDialog(
-                title: 'Camera Permission Required',
-                message: 'Camera permission is required for face recognition. Please enable it in your device settings.\n\nGo to Settings > Data Center Job > Camera and enable access.',
-                onSettingsTap: () async {
-                  print('📱 Opening app settings...');
-                  final opened = await openAppSettings();
-                  print('   Settings opened: $opened');
-                },
-              );
-            }
-          });
-        }
-        return;
-      }
-      
-      // If not permanently denied, try to request permission
-      if (status.isDenied || status.isRestricted) {
-        print('📷 Requesting camera permission...');
+        // Permission is reported as permanently denied
+        // However, on iOS, sometimes the permission handler reports incorrectly
+        // even after the user enables it in Settings. Try to access camera anyway.
+        print('⚠️ Camera permission reported as permanently denied');
+        print('   Attempting to access camera anyway (iOS permission handler may be incorrect)...');
+        
+        // Try to get cameras - sometimes it works even if permission handler says denied
         try {
-          status = await Permission.camera.request();
-          print('📷 Permission request result: $status');
-          print('   isGranted: ${status.isGranted}');
-          print('   isDenied: ${status.isDenied}');
-          print('   isPermanentlyDenied: ${status.isPermanentlyDenied}');
+          final testCameras = await availableCameras();
+          if (testCameras != null && testCameras.isNotEmpty) {
+            // Camera is actually accessible! Permission handler was wrong
+            print('✅ Camera is actually accessible despite permission handler reporting denied');
+            canProceedToCamera = true;
+          } else {
+            throw Exception('No cameras available');
+          }
         } catch (e) {
-          print('❌ Error requesting permission: $e');
+          // Camera is truly not accessible, show permission dialog
+          print('❌ Camera is not accessible: $e');
+          print('   User must enable camera in Settings');
           if (mounted) {
             setState(() {
               _isPermissionDenied = true;
+              _isCameraInitialized = false;
+            });
+            // Show dialog after a short delay to ensure UI is updated
+            Future.delayed(Duration(milliseconds: 300), () {
+              if (mounted) {
+                _showPermissionDialog(
+                  title: 'Camera Permission Required',
+                  message: 'Camera permission is required for face recognition. Please enable it in your device settings.\n\nGo to Settings > Data Center Job > Camera and enable access.',
+                  onSettingsTap: () async {
+                    print('📱 Opening app settings...');
+                    final opened = await openAppSettings();
+                    print('   Settings opened: $opened');
+                  },
+                );
+              }
             });
           }
           return;
         }
-      }
-      
-      // Check status after request
-      if (status.isPermanentlyDenied) {
-        print('❌ Camera permission permanently denied after request');
-        if (mounted) {
-          setState(() {
-            _isPermissionDenied = true;
-            _isCameraInitialized = false;
-          });
-          Future.delayed(Duration(milliseconds: 300), () {
+      } else {
+        // If not permanently denied, try to request permission
+        if (status.isDenied || status.isRestricted) {
+          print('📷 Requesting camera permission...');
+          try {
+            status = await Permission.camera.request();
+            print('📷 Permission request result: $status');
+            print('   isGranted: ${status.isGranted}');
+            print('   isDenied: ${status.isDenied}');
+            print('   isPermanentlyDenied: ${status.isPermanentlyDenied}');
+          } catch (e) {
+            print('❌ Error requesting permission: $e');
             if (mounted) {
-              _showPermissionDialog(
-                title: 'Camera Permission Required',
-                message: 'Camera permission is required for face recognition. Please enable it in your device settings.\n\nGo to Settings > Data Center Job > Camera and enable access.',
-                onSettingsTap: () async {
-                  print('📱 Opening app settings...');
-                  await openAppSettings();
-                },
-              );
+              setState(() {
+                _isPermissionDenied = true;
+              });
             }
-          });
+            return;
+          }
         }
-        return;
+        
+        // Check status after request
+        if (status.isPermanentlyDenied) {
+          // Even if permission handler says permanently denied, try to access camera anyway
+          // iOS permission handler sometimes reports incorrectly
+          print('⚠️ Camera permission reported as permanently denied after request');
+          print('   Attempting to access camera anyway (iOS permission handler may be incorrect)...');
+          
+          try {
+            final testCameras = await availableCameras();
+            if (testCameras != null && testCameras.isNotEmpty) {
+              // Camera is actually accessible! Permission handler was wrong
+              print('✅ Camera is actually accessible despite permission handler reporting permanently denied');
+              canProceedToCamera = true;
+            } else {
+              throw Exception('No cameras available');
+            }
+          } catch (e) {
+            // Camera is truly not accessible, show permission dialog
+            print('❌ Camera is not accessible: $e');
+            print('   User must enable camera in Settings');
+            if (mounted) {
+              setState(() {
+                _isPermissionDenied = true;
+                _isCameraInitialized = false;
+              });
+              Future.delayed(Duration(milliseconds: 300), () {
+                if (mounted) {
+                  _showPermissionDialog(
+                    title: 'Camera Permission Required',
+                    message: 'Camera permission is required for face recognition. Please enable it in your device settings.\n\nGo to Settings > Data Center Job > Camera and enable access.',
+                    onSettingsTap: () async {
+                      print('📱 Opening app settings...');
+                      await openAppSettings();
+                    },
+                  );
+                }
+              });
+            }
+            return;
+          }
+        }
+        
+        // Only check if permission is granted if we haven't already determined camera is accessible
+        if (!canProceedToCamera && !status.isGranted) {
+          // Permission was denied (but not permanently)
+          print('❌ Camera permission denied (not permanent)');
+          if (mounted) {
+            setState(() {
+              _isPermissionDenied = true;
+              _isCameraInitialized = false;
+            });
+            Get.snackbar(
+              'Camera Permission',
+              'Camera permission is required for face recognition. Please grant permission when prompted.',
+              snackPosition: SnackPosition.BOTTOM,
+              backgroundColor: Colors.red,
+              colorText: Colors.white,
+              duration: Duration(seconds: 4),
+              mainButton: TextButton(
+                onPressed: () async {
+                  // Retry permission request
+                  await _retryPermission();
+                },
+                child: Text(
+                  'Retry',
+                  style: TextStyle(color: Colors.white),
+                ),
+              ),
+            );
+          }
+          return;
+        }
+        
+        // Permission is now granted (or camera is accessible despite permission handler)
+        if (!canProceedToCamera && status.isGranted) {
+          canProceedToCamera = true;
+          print('✅ Camera permission granted after request');
+        }
       }
-      
-      if (!status.isGranted) {
-        // Permission was denied (but not permanently)
-        print('❌ Camera permission denied (not permanent)');
+    }
+    
+    // Reset permission denied state if we can proceed
+    if (canProceedToCamera && mounted) {
+      setState(() {
+        _isPermissionDenied = false;
+      });
+    }
+    
+    // Initialize camera
+    if (!canProceedToCamera) {
+      return;
+    }
+
+    try {
+      print('📷 Attempting to get available cameras...');
+      _cameras = await availableCameras();
+      if (_cameras == null || _cameras!.isEmpty) {
+        print('❌ No cameras available');
         if (mounted) {
           setState(() {
             _isPermissionDenied = true;
             _isCameraInitialized = false;
           });
           Get.snackbar(
-            'Camera Permission',
-            'Camera permission is required for face recognition. Please grant permission when prompted.',
+            'Error',
+            'No cameras available on this device',
             snackPosition: SnackPosition.BOTTOM,
             backgroundColor: Colors.red,
             colorText: Colors.white,
-            duration: Duration(seconds: 4),
-            mainButton: TextButton(
-              onPressed: () async {
-                // Retry permission request
-                await _retryPermission();
-              },
-              child: Text(
-                'Retry',
-                style: TextStyle(color: Colors.white),
-              ),
-            ),
           );
         }
         return;
       }
-    }
-    
-    // Permission is granted, reset permission denied state
-    if (mounted) {
-      setState(() {
-        _isPermissionDenied = false;
-      });
-    }
-    
-    print('✅ Camera permission granted');
-
-    try {
-      _cameras = await availableCameras();
-      if (_cameras == null || _cameras!.isEmpty) {
-        Get.snackbar(
-          'Error',
-          'No cameras available',
-          snackPosition: SnackPosition.BOTTOM,
-          backgroundColor: Colors.red,
-          colorText: Colors.white,
-        );
-        return;
-      }
+      
+      print('✅ Found ${_cameras!.length} camera(s)');
 
       // Find front camera
       CameraDescription? frontCamera;
@@ -244,6 +364,17 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
 
       // Use front camera if available, otherwise use first camera
       final selectedCamera = frontCamera ?? _cameras![0];
+      print('📷 Using camera: ${selectedCamera.name} (${selectedCamera.lensDirection})');
+
+      // Dispose existing controller if any
+      if (_cameraController != null) {
+        try {
+          await _cameraController!.dispose();
+        } catch (e) {
+          print('⚠️ Error disposing existing camera controller: $e');
+        }
+        _cameraController = null;
+      }
 
       _cameraController = CameraController(
         selectedCamera,
@@ -251,79 +382,228 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
         enableAudio: false,
       );
 
+      print('📷 Initializing camera controller...');
       await _cameraController!.initialize();
+      print('✅ Camera controller initialized successfully');
 
       if (mounted) {
         setState(() {
           _isCameraInitialized = true;
+          _isPermissionDenied = false;
         });
         _startFaceDetection();
-        _startScanning();
+    _startScanning();
+      } else {
+        print('⚠️ Widget not mounted, disposing camera controller');
+        await _cameraController!.dispose();
+        _cameraController = null;
       }
-    } catch (e) {
-      print('Error initializing camera: $e');
-      Get.snackbar(
-        'Camera Error',
-        'Failed to initialize camera: ${e.toString()}',
-        snackPosition: SnackPosition.BOTTOM,
-        backgroundColor: Colors.red,
-        colorText: Colors.white,
-      );
+    } catch (e, stackTrace) {
+      print('❌ Error initializing camera: $e');
+      print('   Stack trace: $stackTrace');
+      
+      // Dispose controller if it was partially initialized
+      if (_cameraController != null) {
+        try {
+          await _cameraController!.dispose();
+        } catch (disposeError) {
+          print('⚠️ Error disposing camera controller: $disposeError');
+        }
+        _cameraController = null;
+      }
+      
+      if (mounted) {
+      setState(() {
+          _isPermissionDenied = true;
+          _isCameraInitialized = false;
+        });
+        
+        // Check if it's a permission error
+        String errorMessage = 'Failed to initialize camera';
+        if (e.toString().contains('permission') || e.toString().contains('Permission')) {
+          errorMessage = 'Camera permission is required. Please enable it in Settings > Data Center Job > Camera';
+          Future.delayed(Duration(milliseconds: 500), () {
+            if (mounted) {
+              _showPermissionDialog(
+                title: 'Camera Permission Required',
+                message: 'Camera permission is required for face recognition. Please enable it in your device settings.\n\nGo to Settings > Data Center Job > Camera and enable access.',
+                onSettingsTap: () async {
+                  print('📱 Opening app settings...');
+                  await openAppSettings();
+                },
+              );
+            }
+          });
+        } else {
+          Get.snackbar(
+            'Camera Error',
+            errorMessage,
+            snackPosition: SnackPosition.BOTTOM,
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+            duration: Duration(seconds: 4),
+          );
+        }
+      }
     }
   }
 
   void _startFaceDetection() {
-    _faceDetectionTimer = Timer.periodic(Duration(milliseconds: 500), (timer) async {
-      if (_cameraController == null || !_cameraController!.value.isInitialized || _isProcessingFrame || _isScanningComplete) {
+    // Use camera image stream instead of taking pictures
+    // This is more efficient and doesn't create image files
+    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+      print('❌ Camera not initialized, cannot start face detection');
+      return;
+    }
+
+    print('📷 Starting face detection with image stream...');
+    
+    _cameraController!.startImageStream((CameraImage image) async {
+      // Stop if scanning is complete
+      if (_isScanningComplete || _isProcessingFrame || !mounted) {
+        return;
+      }
+      
+      // Check if controller is still valid
+      if (_cameraController == null || !_cameraController!.value.isInitialized) {
         return;
       }
 
       try {
         _isProcessingFrame = true;
-        final XFile image = await _cameraController!.takePicture();
-        final inputImage = InputImage.fromFilePath(image.path);
         
-        final List<Face> faces = await _faceDetector.processImage(inputImage);
-        
-        if (mounted) {
-          setState(() {
-            _isFaceDetected = faces.isNotEmpty;
-            
-            // If face is detected, increase progress faster
-            if (_isFaceDetected && _progress < 100) {
-              _progress = (_progress + 2).clamp(0, 100);
-            }
-            
-            // Complete scanning when face detected for sufficient time
-            if (_isFaceDetected && _progress >= 100 && !_isScanningComplete) {
-              _isScanningComplete = true;
-              timer.cancel();
-              _timer?.cancel();
-              _animationController.stop();
-              // Capture face image
-              _captureFaceImage();
-            }
-          });
+        // Convert CameraImage to InputImage for face detection
+        final inputImage = _inputImageFromCameraImage(image);
+        if (inputImage == null) {
+          _isProcessingFrame = false;
+          return;
         }
         
-        // Don't delete the image file - we need it for face capture
-        // The file will be used when scanning completes
+        // Process image for face detection
+        final List<Face> faces = await _faceDetector.processImage(inputImage);
+        
+        // Check again if still mounted and not complete
+        if (!mounted || _isScanningComplete) {
+          _isProcessingFrame = false;
+          return;
+        }
+        
+        final faceDetected = faces.isNotEmpty;
+        print('👤 Face detection: ${faceDetected ? "✅ Face detected" : "❌ No face"} (${faces.length} faces)');
+        
+        setState(() {
+          _isFaceDetected = faceDetected;
+          
+          // If face is detected, increase progress faster
+          if (faceDetected && _progress < 100) {
+            _progress = (_progress + 5).clamp(0, 100);
+            print('📈 Progress increased to: $_progress%');
+          }
+          
+          // Complete scanning when:
+          // 1. Face is detected AND progress >= 100%, OR
+          // 2. Progress is 100% (even if face detection hasn't triggered yet - fallback)
+          final shouldComplete = (faceDetected && _progress >= 100) || 
+                                 (_progress >= 100 && !_isScanningComplete);
+          
+          if (shouldComplete && !_isScanningComplete) {
+            print('✅ Scanning complete! Face detected: $faceDetected, Progress: $_progress%');
+            _isScanningComplete = true;
+            _timer?.cancel();
+            _faceDetectionTimer?.cancel();
+            _animationController.stop();
+            // Stop image stream (async, but don't await in setState)
+            _cameraController?.stopImageStream().then((_) {
+              print('✅ Image stream stopped');
+            }).catchError((e) {
+              print('⚠️ Error stopping image stream: $e');
+            });
+            // Capture face image for submission
+            _captureFaceImage();
+          }
+        });
       } catch (e) {
-        print('Face detection error: $e');
+        // Check if error is due to disposed controller
+        if (e.toString().contains('disposed') || e.toString().contains('Disposed')) {
+          print('⚠️ Camera controller was disposed, stopping face detection');
+          return;
+        }
+        print('❌ Face detection error: $e');
       } finally {
         _isProcessingFrame = false;
       }
     });
   }
 
+  // Helper method to convert CameraImage to InputImage
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    try {
+      // Determine rotation based on camera orientation
+      final rotation = InputImageRotation.rotation0deg;
+      
+      // Get camera orientation
+      final camera = _cameraController?.description;
+      if (camera != null) {
+        // Adjust rotation based on camera sensor orientation
+        // Front camera typically needs 270deg rotation on iOS
+        final sensorOrientation = camera.sensorOrientation;
+        if (sensorOrientation == 90) {
+          // Already correct
+        }
+      }
+      
+      // Create metadata for the input image
+      final inputImageData = InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation: rotation,
+        format: InputImageFormat.yuv420,
+        bytesPerRow: image.planes[0].bytesPerRow,
+      );
+
+      // For YUV420 format, we need all planes
+      // But ML Kit can work with just the Y plane for face detection
+      final plane = image.planes[0];
+      final bytes = plane.bytes;
+
+      return InputImage.fromBytes(
+        bytes: bytes,
+        metadata: inputImageData,
+      );
+    } catch (e) {
+      print('❌ Error converting camera image: $e');
+      return null;
+    }
+  }
+
   Future<void> _captureFaceImage() async {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      print('Camera not initialized, cannot capture face image');
+    // Prevent duplicate captures
+    if (_isSubmitting || _capturedFaceImage != null) {
+      print('⚠️ Face image already captured or submission in progress, skipping...');
+      return;
+    }
+    
+    // Check if controller is still valid
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) {
+      print('❌ Camera not initialized, cannot capture face image');
+      return;
+    }
+    
+    // Check if mounted
+    if (!mounted) {
+      print('❌ Widget not mounted, cannot capture face image');
       return;
     }
 
     try {
-      print('Capturing face image...');
+      print('📸 Capturing face image for submission...');
+      
+      // Double-check controller is still valid before taking picture
+      if (_cameraController == null || !_cameraController!.value.isInitialized) {
+        print('❌ Camera controller became invalid before capture');
+        return;
+      }
+      
       final XFile image = await _cameraController!.takePicture();
       final file = File(image.path);
       
@@ -640,12 +920,39 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
 
   Future<void> _retryPermission() async {
     print('🔄 Retrying camera permission request...');
-    setState(() {
-      _isPermissionDenied = false;
-    });
+    if (mounted) {
+      setState(() {
+        _isPermissionDenied = false;
+      });
+    }
     
-    // Check if permission is permanently denied
+    // Always try to access camera directly first (iOS quirk)
+    // Sometimes camera works even if permission handler says denied
+    print('📷 Attempting direct camera access (bypassing permission handler)...');
+    try {
+      final testCameras = await availableCameras();
+      if (testCameras != null && testCameras.isNotEmpty) {
+        print('✅ Camera is accessible! Proceeding with initialization...');
+        await _initializeCamera();
+        return;
+      }
+    } catch (e) {
+      print('⚠️ Direct camera access failed: $e');
+    }
+    
+    // Force a fresh permission status check
     PermissionStatus status = await Permission.camera.status;
+    print('📷 Current permission status on retry: $status');
+    print('   isGranted: ${status.isGranted}');
+    print('   isPermanentlyDenied: ${status.isPermanentlyDenied}');
+    
+    // If permission is now granted (user enabled it in settings), proceed
+    if (status.isGranted) {
+      print('✅ Permission is now granted, initializing camera...');
+      await _initializeCamera();
+      return;
+    }
+    
     if (status.isPermanentlyDenied) {
       // If permanently denied, open settings
       print('📱 Opening app settings...');
@@ -854,17 +1161,34 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
 
   void _startScanning() {
     _timer = Timer.periodic(Duration(milliseconds: 100), (timer) {
-      if (mounted && !_isScanningComplete) {
+      // Stop if scanning is complete
+      if (_isScanningComplete) {
+        timer.cancel();
+        return;
+      }
+      
+      if (mounted) {
         setState(() {
+          // Only increase progress if face is not detected (slow progress)
+          // Face detection will increase progress faster when face is detected
           if (_progress < 100 && !_isFaceDetected) {
             _progress += 1;
           }
           
-          if (_progress >= 100 && _isFaceDetected && !_isScanningComplete) {
+          // Fallback: Complete if progress reaches 100% (even without face detection)
+          // This ensures scanning completes even if face detection has issues
+          if (_progress >= 100 && !_isScanningComplete) {
+            print('✅ Progress reached 100%, completing scan (fallback)...');
             _isScanningComplete = true;
             timer.cancel();
             _faceDetectionTimer?.cancel();
             _animationController.stop();
+            // Stop image stream
+            _cameraController?.stopImageStream().then((_) {
+              print('✅ Image stream stopped');
+            }).catchError((e) {
+              print('⚠️ Error stopping image stream: $e');
+            });
             // Capture face image
             _captureFaceImage();
           }
@@ -1059,26 +1383,76 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
                                                 ),
                                               ),
                                               SizedBox(height: 12.h),
-                                              GestureDetector(
-                                                onTap: _retryPermission,
-                                                child: Container(
-                                                  padding: EdgeInsets.symmetric(
-                                                    horizontal: 16.w,
-                                                    vertical: 8.h,
-                                                  ),
-                                                  decoration: BoxDecoration(
-                                                    color: AppColors.primaryColor,
-                                                    borderRadius: BorderRadius.circular(20.r),
-                                                  ),
-                                                  child: Text(
-                                                    'Grant Permission',
-                                                    style: TextStyle(
-                                                      fontSize: 12.sp,
-                                                      color: Colors.white,
-                                                      fontWeight: FontWeight.w600,
+                                              Row(
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: [
+                                                  GestureDetector(
+                                                    onTap: _retryPermission,
+                                                    child: Container(
+                                                      padding: EdgeInsets.symmetric(
+                                                        horizontal: 16.w,
+                                                        vertical: 8.h,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: AppColors.primaryColor,
+                                                        borderRadius: BorderRadius.circular(20.r),
+                                                      ),
+                                                      child: Text(
+                                                        'Grant Permission',
+                                                        style: TextStyle(
+                                                          fontSize: 12.sp,
+                                                          color: Colors.white,
+                                                          fontWeight: FontWeight.w600,
+                                                        ),
+                                                      ),
                                                     ),
                                                   ),
-                                                ),
+                                                  SizedBox(width: 12.w),
+                                                  GestureDetector(
+                                                    onTap: () async {
+                                                      print('🔄 Manual refresh triggered');
+                                                      if (mounted) {
+                                                        setState(() {
+                                                          _isPermissionDenied = false;
+                                                        });
+                                                      }
+                                                      await _initializeCamera();
+                                                    },
+                                                    child: Container(
+                                                      padding: EdgeInsets.symmetric(
+                                                        horizontal: 16.w,
+                                                        vertical: 8.h,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.white.withOpacity(0.2),
+                                                        borderRadius: BorderRadius.circular(20.r),
+                                                        border: Border.all(
+                                                          color: Colors.white.withOpacity(0.3),
+                                                          width: 1,
+                                                        ),
+                                                      ),
+                                                      child: Row(
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          Icon(
+                                                            Icons.refresh,
+                                                            color: Colors.white,
+                                                            size: 14.sp,
+                                                          ),
+                                                          SizedBox(width: 4.w),
+                                                          Text(
+                                                            'Refresh',
+                                                            style: TextStyle(
+                                                              fontSize: 12.sp,
+                                                              color: Colors.white,
+                                                              fontWeight: FontWeight.w600,
+                                                            ),
+                                                          ),
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ],
                                           ),
@@ -1222,9 +1596,9 @@ class _FaceScanningScreenState extends State<FaceScanningScreen>
                                                             ),
                                                           ),
                                                         ],
-                                                      ),
-                                                    ),
-                                                  ),
+                                          ),
+                                        ),
+                                      ),
                                     // Corner brackets
                                     Positioned(
                                       top: 30.h,
