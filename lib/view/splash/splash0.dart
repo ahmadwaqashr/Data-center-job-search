@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:data_center_job/view/splash/splash_wrapper.dart';
 import 'package:data_center_job/view/candidate/dashboard/dashboard_screen.dart';
+import 'package:data_center_job/view/employer/dashboard/dashboard_screen_employer.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -38,19 +39,31 @@ class _Splash0State extends State<Splash0> {
       print('   User role: ${userRole ?? "NULL"}');
       print('   Auth token exists: ${authToken != null}');
       
-      // If user exists and role is candidate, navigate to dashboard
+      // Check if user is authenticated
       if (userDataString != null && 
-          userRole == 'candidate' && 
           authToken != null && 
           authToken.isNotEmpty) {
-        print('✅ User is authenticated as candidate, navigating to dashboard');
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => DashboardScreen()),
-          );
+        
+        // Navigate based on user role
+        if (userRole == 'candidate') {
+          print('✅ User is authenticated as candidate, navigating to candidate dashboard');
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => DashboardScreen()),
+            );
+          }
+          return;
+        } else if (userRole == 'employer') {
+          print('✅ User is authenticated as employer, navigating to employer dashboard');
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => DashboardScreenEmployer()),
+            );
+          }
+          return;
         }
-        return;
       }
       
       // Otherwise, navigate to splash wrapper (onboarding/auth flow)

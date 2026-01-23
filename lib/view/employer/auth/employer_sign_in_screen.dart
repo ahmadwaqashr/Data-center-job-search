@@ -14,9 +14,7 @@ class EmployerSignInScreen extends StatefulWidget {
 }
 
 class _EmployerSignInScreenState extends State<EmployerSignInScreen> {
-  final TextEditingController _emailController = TextEditingController(
-    text: 'name@company.com',
-  );
+  final TextEditingController _emailController = TextEditingController();
 
   @override
   void dispose() {
@@ -224,6 +222,11 @@ class _EmployerSignInScreenState extends State<EmployerSignInScreen> {
                                         Icons.email_outlined,
                                         color: Colors.grey[600],
                                         size: 20.sp,
+                                      ),
+                                      hintText: 'name@company.com',
+                                      hintStyle: TextStyle(
+                                        color: Colors.grey[500],
+                                        fontSize: 14.sp,
                                       ),
                                       border: InputBorder.none,
                                       contentPadding: EdgeInsets.symmetric(

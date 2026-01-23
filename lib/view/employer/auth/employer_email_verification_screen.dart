@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:data_center_job/view/employer/auth/employer_company_details_screen.dart';
+import 'package:data_center_job/view/employer/dashboard/dashboard_screen_employer.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
@@ -291,12 +292,8 @@ class _EmployerEmailVerificationScreenState
       await prefs.remove('email_otp_${widget.email}');
       await prefs.remove('email_otp_expiry_${widget.email}');
       
-      setState(() {
-        _isVerifying = false;
-      });
-      
-      // Navigate to next screen
-      Get.to(() => EmployerCompanyDetailsScreen());
+      // Call login API to check if employer exists
+      await _callEmployerLoginAPI();
       
     } catch (e) {
       setState(() {
@@ -311,6 +308,123 @@ class _EmployerEmailVerificationScreenState
         backgroundColor: Colors.red,
         colorText: Colors.white,
       );
+    }
+  }
+
+  // Call employer login API
+  Future<void> _callEmployerLoginAPI() async {
+    try {
+      print('🔐 Calling employer login API...');
+      print('   Email: ${widget.email}');
+      print('   Role: employer');
+      
+      // Prepare request data
+      final requestData = jsonEncode({
+        'role': 'employer',
+        'email': widget.email,
+      });
+      
+      print('📤 Request data: $requestData');
+
+      // Make login API call
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.candidateLogin),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        ),
+        data: requestData,
+      );
+
+      print('📥 Login API Response:');
+      print('   Status Code: ${response.statusCode}');
+      print('   Response Data: ${jsonEncode(response.data)}');
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        
+        print('✅ Login successful! Employer exists.');
+        print('   User ID: ${responseData['id']}');
+        print('   Email: ${responseData['email']}');
+        print('   Full Name: ${responseData['fullName']}');
+        print('   Token: ${responseData['token']?.substring(0, 20) ?? "NULL"}...');
+        
+        // Save user data to SharedPreferences
+        await _saveUserData(responseData);
+        
+        setState(() {
+          _isVerifying = false;
+        });
+
+        // Navigate to employer dashboard - user exists
+        Get.offAll(() => DashboardScreenEmployer());
+      } else {
+        throw Exception('Login failed with status: ${response.statusCode}');
+      }
+    } on DioException catch (e) {
+      setState(() {
+        _isVerifying = false;
+      });
+
+      print('❌ Login API Error:');
+      print('   Status Code: ${e.response?.statusCode}');
+      print('   Error: ${e.message}');
+      print('   Response: ${e.response?.data}');
+
+      // User doesn't exist, navigate to company details screen for signup
+      print('ℹ️ Employer does not exist, navigating to company details...');
+      Get.off(() => EmployerCompanyDetailsScreen(
+        verifiedEmail: widget.email,
+      ));
+    } catch (e) {
+      setState(() {
+        _isVerifying = false;
+      });
+      print('❌ Unexpected error during login: $e');
+      
+      // Navigate to company details on any error
+      Get.off(() => EmployerCompanyDetailsScreen(
+        verifiedEmail: widget.email,
+      ));
+    }
+  }
+
+  // Save user data to SharedPreferences
+  Future<void> _saveUserData(Map<String, dynamic> userData) async {
+    try {
+      print('💾 Saving employer data to SharedPreferences...');
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Save all user data as JSON
+      await prefs.setString('user_data', jsonEncode(userData));
+      print('   ✅ user_data saved');
+      
+      // Save individual important fields for easy access
+      if (userData['token'] != null) {
+        await prefs.setString('auth_token', userData['token']);
+        print('   ✅ auth_token saved');
+      }
+      if (userData['id'] != null) {
+        await prefs.setString('user_id', userData['id'].toString());
+        print('   ✅ user_id saved: ${userData['id']}');
+      }
+      if (userData['email'] != null) {
+        await prefs.setString('user_email', userData['email']);
+        print('   ✅ user_email saved: ${userData['email']}');
+      }
+      if (userData['fullName'] != null) {
+        await prefs.setString('user_name', userData['fullName']);
+        print('   ✅ user_name saved: ${userData['fullName']}');
+      }
+      // Always save role as 'employer'
+      await prefs.setString('user_role', 'employer');
+      print('   ✅ user_role saved: employer');
+      
+      print('✅ All employer data saved to SharedPreferences successfully');
+    } catch (e) {
+      print('❌ Error saving user data: $e');
     }
   }
 

@@ -25,6 +25,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   bool _isLoading = true;
   bool _isSaving = false;
   Map<String, dynamic>? _userData;
+  String? _userRole; // Store user role
   String? _profilePicUrl;
   File? _selectedImageFile;
   final ImagePicker _imagePicker = ImagePicker();
@@ -143,16 +144,49 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         print('   Adding fullname: $newFullName');
       }
 
-      // Add location if changed (optional)
-      final currentLocation = _userData?['location']?.toString() ?? '';
+      // Add location if changed (optional) - use appropriate field based on role
+      final currentLocation = _userRole == 'employer' 
+          ? (_userData?['companyLocation']?.toString() ?? '')
+          : (_userData?['location']?.toString() ?? '');
       final newLocation = _locationController.text.trim();
       if (newLocation.isNotEmpty && newLocation != currentLocation) {
-        dataMap['location'] = newLocation;
-        print('   Adding location: $newLocation');
+        if (_userRole == 'employer') {
+          dataMap['companyLocation'] = newLocation;
+        } else {
+          dataMap['location'] = newLocation;
+        }
+        print('   Adding location: $newLocation (field: ${_userRole == 'employer' ? 'companyLocation' : 'location'})');
       }
 
-      // Check if there are any changes
-      if (dataMap.isEmpty) {
+      // Add email if changed and role is employer (optional)
+      if (_userRole == 'employer') {
+        final currentEmail = _userData?['email']?.toString() ?? '';
+        final newEmail = _emailController.text.trim();
+        if (newEmail.isNotEmpty && newEmail != currentEmail) {
+          dataMap['email'] = newEmail;
+          print('   Adding email: $newEmail');
+        }
+      }
+
+      // Add phone if changed and role is employer (optional)
+      if (_userRole == 'employer') {
+        final currentPhone = _userData?['phone']?.toString() ?? '';
+        final newPhone = _phoneController.text.trim();
+        if (newPhone.isNotEmpty && newPhone != currentPhone) {
+          dataMap['phone'] = newPhone;
+          print('   Adding phone: $newPhone');
+        }
+      }
+
+      // Always include role for employers (even if only location is being updated)
+      if (_userRole == 'employer') {
+        dataMap['role'] = 'employer';
+        print('   Adding role: employer');
+      }
+
+      // Check if there are any changes (excluding role)
+      final hasChanges = dataMap.keys.any((key) => key != 'role');
+      if (!hasChanges) {
         Get.snackbar(
           'Info',
           'No changes to save',
@@ -170,11 +204,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       final formData = FormData.fromMap(dataMap);
 
       print('🌐 Making API call to: ${ApiConfig.getUrl(ApiConfig.editMyProfile)}');
+      print('   User Role: ${_userRole ?? "NULL"}');
       print('   Data map keys: ${dataMap.keys.toList()}');
       print('   FormData structure:');
       print('     - profile_pic: ${dataMap['profile_pic'] != null ? 'Present (file)' : 'Not included'}');
       print('     - fullname: ${dataMap['fullname'] ?? 'Not included'}');
-      print('     - location: ${dataMap['location'] ?? 'Not included'}');
+      if (_userRole == 'employer') {
+        print('     - companyLocation: ${dataMap['companyLocation'] ?? 'Not included'}');
+        print('     - email: ${dataMap['email'] ?? 'Not included'}');
+        print('     - phone: ${dataMap['phone'] ?? 'Not included'}');
+        print('     - role: ${dataMap['role'] ?? 'Not included'}');
+      } else {
+        print('     - location: ${dataMap['location'] ?? 'Not included'}');
+      }
       if (_selectedImageFile != null) {
         print('     - Profile pic file path: ${_selectedImageFile!.path}');
         print('     - Profile pic file name: ${_selectedImageFile!.path.split('/').last}');
@@ -199,6 +241,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         // Update SharedPreferences with new data
         final updatedUserData = response.data as Map<String, dynamic>;
         await prefs.setString('user_data', jsonEncode(updatedUserData));
+
+        // Ensure role is preserved in SharedPreferences
+        if (_userRole != null) {
+          await prefs.setString('user_role', _userRole!);
+          print('   ✅ user_role preserved: $_userRole');
+        }
 
         // Update local state
         setState(() {
@@ -245,6 +293,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       print('📥 Loading user data from SharedPreferences...');
       final prefs = await SharedPreferences.getInstance();
 
+      // Get user role
+      _userRole = prefs.getString('user_role');
+      print('   User Role: ${_userRole ?? "NULL"}');
+
       final userDataString = prefs.getString('user_data');
       if (userDataString != null) {
         final userData = jsonDecode(userDataString) as Map<String, dynamic>;
@@ -253,6 +305,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         print('   Email: ${userData['email']}');
         print('   Phone: ${userData['phone']}');
         print('   Location: ${userData['location']}');
+        print('   Company Location: ${userData['companyLocation']}');
         print('   Profile Pic: ${userData['profilePic']}');
 
         setState(() {
@@ -263,7 +316,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           // Set phone number
           _phoneController.text = userData['phone']?.toString() ?? '';
           
-          _locationController.text = userData['location']?.toString() ?? '';
+          // Set location based on role
+          if (_userRole == 'employer') {
+            _locationController.text = userData['companyLocation']?.toString() ?? '';
+          } else {
+            _locationController.text = userData['location']?.toString() ?? '';
+          }
           
           // Set profile picture URL
           if (userData['profilePic'] != null && userData['profilePic'].toString().isNotEmpty) {
@@ -543,10 +601,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               child: TextField(
                                 controller: _emailController,
                                 keyboardType: TextInputType.emailAddress,
-                                readOnly: true,
+                                readOnly: _userRole != 'employer' || (_userData?['email']?.toString().isNotEmpty ?? false),
                                 style: TextStyle(
                                   fontSize: 15.sp,
-                                  color: Colors.grey[600],
+                                  color: (_userRole == 'employer' && (_userData?['email']?.toString().isEmpty ?? true))
+                                      ? Colors.black
+                                      : Colors.grey[600],
                                   fontWeight: FontWeight.w500,
                                 ),
                                 decoration: InputDecoration(
@@ -594,10 +654,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               child: TextField(
                                 controller: _phoneController,
                                 keyboardType: TextInputType.phone,
-                                readOnly: true,
+                                readOnly: _userRole != 'employer' || (_userData?['phone']?.toString().isNotEmpty ?? false),
                                 style: TextStyle(
                                   fontSize: 15.sp,
-                                  color: Colors.grey[600],
+                                  color: (_userRole == 'employer' && (_userData?['phone']?.toString().isEmpty ?? true))
+                                      ? Colors.black
+                                      : Colors.grey[600],
                                   fontWeight: FontWeight.w500,
                                 ),
                                 decoration: InputDecoration(
@@ -620,31 +682,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text(
-                                  'Location',
+                                  _userRole == 'employer' ? 'Company location' : 'Location',
                                   style: TextStyle(
                                     fontSize: 14.sp,
                                     fontWeight: FontWeight.w500,
                                     color: Colors.black,
                                   ),
                                 ),
-                                Container(
-                                  padding: EdgeInsets.symmetric(
-                                    horizontal: 8.w,
-                                    vertical: 4.h,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: Color(0xFF2563EB).withOpacity(0.1),
-                                    borderRadius: BorderRadius.circular(4.r),
-                                  ),
-                                  child: Text(
-                                    'Required',
-                                    style: TextStyle(
-                                      fontSize: 11.sp,
-                                      color: Color(0xFF2563EB),
-                                      fontWeight: FontWeight.w500,
+                                if (_userRole == 'candidate')
+                                  Container(
+                                    padding: EdgeInsets.symmetric(
+                                      horizontal: 8.w,
+                                      vertical: 4.h,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: Color(0xFF2563EB).withOpacity(0.1),
+                                      borderRadius: BorderRadius.circular(4.r),
+                                    ),
+                                    child: Text(
+                                      'Required',
+                                      style: TextStyle(
+                                        fontSize: 11.sp,
+                                        color: Color(0xFF2563EB),
+                                        fontWeight: FontWeight.w500,
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
                             SizedBox(height: 8.h),
@@ -666,6 +729,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                     color: Colors.grey[600],
                                     size: 22.sp,
                                   ),
+                                  hintText: _userRole == 'employer' ? 'e.g. Seattle, WA' : null,
+                                  hintStyle: TextStyle(
+                                    fontSize: 15.sp,
+                                    color: Colors.grey[400],
+                                  ),
                                   border: InputBorder.none,
                                   contentPadding: EdgeInsets.symmetric(
                                     horizontal: 16.w,
@@ -674,17 +742,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                                 ),
                               ),
                             ),
-                            SizedBox(height: 8.h),
-                            Padding(
-                              padding: EdgeInsets.only(left: 12.w),
-                              child: Text(
-                                'Open to roles within 25 miles radius',
-                                style: TextStyle(
-                                  fontSize: 12.sp,
-                                  color: Colors.grey[600],
+                            if (_userRole == 'candidate') ...[
+                              SizedBox(height: 8.h),
+                              Padding(
+                                padding: EdgeInsets.only(left: 12.w),
+                                child: Text(
+                                  'Open to roles within 25 miles radius',
+                                  style: TextStyle(
+                                    fontSize: 12.sp,
+                                    color: Colors.grey[600],
+                                  ),
                                 ),
                               ),
-                            ),
+                            ],
                             SizedBox(height: 10.h),
                             // Save changes button
                             GestureDetector(

@@ -1,13 +1,19 @@
+import 'dart:async';
+import 'dart:convert';
 import 'package:data_center_job/utils/custom_button.dart';
 import 'package:data_center_job/view/employer/auth/employer_logo_screen.dart';
+import 'package:data_center_job/view/employer/auth/employer_sign_in_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:http/http.dart' as http;
 
 import '../../../constants/colors.dart';
 
 class EmployerCompanyDetailsScreen extends StatefulWidget {
-  const EmployerCompanyDetailsScreen({super.key});
+  final String? verifiedEmail;
+  
+  const EmployerCompanyDetailsScreen({super.key, this.verifiedEmail});
 
   @override
   State<EmployerCompanyDetailsScreen> createState() =>
@@ -17,25 +23,133 @@ class EmployerCompanyDetailsScreen extends StatefulWidget {
 class _EmployerCompanyDetailsScreenState
     extends State<EmployerCompanyDetailsScreen> {
   final TextEditingController _companyNameController = TextEditingController();
-  final TextEditingController _workEmailController = TextEditingController(
-    text: 'alex@company.com',
-  );
+  late final TextEditingController _workEmailController;
   final TextEditingController _fullNameController = TextEditingController();
   final TextEditingController _roleController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _websiteController = TextEditingController();
+  final TextEditingController _facebookController = TextEditingController();
+  final TextEditingController _linkedinController = TextEditingController();
+  final TextEditingController _instagramController = TextEditingController();
 
   String _selectedCompanySize = '1-20';
   String _selectedHiringVolume = '1-5 roles';
   bool _confirmTerms = false;
+  bool _isEmailEditable = false;
+
+  // Location autocomplete
+  static const String _googlePlacesApiKey = "AIzaSyBsOA0owjpxAXWhxPdD_kit9W9jHgPwDUI";
+  List<Map<String, dynamic>> _locationPredictions = [];
+  Timer? _locationDebounceTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize email controller with verified email or empty
+    _workEmailController = TextEditingController(
+      text: widget.verifiedEmail ?? '',
+    );
+    // Add listener for location search
+    _locationController.addListener(_onLocationSearchChanged);
+  }
 
   @override
   void dispose() {
+    _locationDebounceTimer?.cancel();
+    _locationController.removeListener(_onLocationSearchChanged);
     _companyNameController.dispose();
     _workEmailController.dispose();
     _fullNameController.dispose();
     _roleController.dispose();
     _locationController.dispose();
+    _websiteController.dispose();
+    _facebookController.dispose();
+    _linkedinController.dispose();
+    _instagramController.dispose();
     super.dispose();
+  }
+
+  void _onLocationSearchChanged() {
+    _locationDebounceTimer?.cancel();
+    _locationDebounceTimer = Timer(const Duration(milliseconds: 500), () {
+      _searchPlaces(_locationController.text);
+    });
+  }
+
+  Future<void> _searchPlaces(String query) async {
+    if (query.trim().isEmpty) {
+      if (mounted) {
+        setState(() {
+          _locationPredictions = [];
+        });
+      }
+      return;
+    }
+
+    print('🔍 Searching places for: $query');
+
+    try {
+      final String url = 'https://maps.googleapis.com/maps/api/place/autocomplete/json'
+          '?input=${Uri.encodeComponent(query)}'
+          '&key=$_googlePlacesApiKey'
+          '&language=en';
+
+      final response = await http.get(Uri.parse(url));
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('📍 Places API response status: ${data['status']}');
+        
+        if (data['status'] == 'OK' && data['predictions'] != null) {
+          final predictions = List<Map<String, dynamic>>.from(data['predictions']);
+          print('✅ Found ${predictions.length} location predictions');
+          
+          if (mounted) {
+            setState(() {
+              _locationPredictions = predictions;
+            });
+          }
+        } else {
+          print('⚠️ No predictions found. Status: ${data['status']}');
+          if (mounted) {
+            setState(() {
+              _locationPredictions = [];
+            });
+          }
+        }
+      } else {
+        print('❌ Places API error: ${response.statusCode}');
+        if (mounted) {
+          setState(() {
+            _locationPredictions = [];
+          });
+        }
+      }
+    } catch (e) {
+      print('❌ Error searching places: $e');
+      if (mounted) {
+        setState(() {
+          _locationPredictions = [];
+        });
+      }
+    }
+  }
+
+  void _selectLocation(Map<String, dynamic> prediction) {
+    final locationName = prediction['description']?.toString() ?? '';
+    if (locationName.isEmpty) {
+      return;
+    }
+
+    print('✅ Selecting location: $locationName');
+    
+    // Dismiss keyboard
+    FocusScope.of(context).unfocus();
+    
+    setState(() {
+      _locationController.text = locationName;
+      _locationPredictions = [];
+    });
   }
 
   @override
@@ -301,13 +415,30 @@ class _EmployerCompanyDetailsScreenState
                                         color: Colors.black,
                                       ),
                                     ),
-                                    Text(
-                                      'Used for candidate updates',
-                                      style: TextStyle(
-                                        fontSize: 12.sp,
-                                        color: Colors.grey[600],
+                                    if (widget.verifiedEmail != null)
+                                      GestureDetector(
+                                        onTap: () {
+                                          print('👆 Edit email button tapped');
+                                          // Navigate back to sign-in screen to restart email verification
+                                          Get.offAll(() => EmployerSignInScreen());
+                                        },
+                                        child: Text(
+                                          'Edit',
+                                          style: TextStyle(
+                                            fontSize: 14.sp,
+                                            color: AppColors.primaryColor,
+                                            fontWeight: FontWeight.w500,
+                                          ),
+                                        ),
+                                      )
+                                    else
+                                      Text(
+                                        'Used for candidate updates',
+                                        style: TextStyle(
+                                          fontSize: 12.sp,
+                                          color: Colors.grey[600],
+                                        ),
                                       ),
-                                    ),
                                   ],
                                 ),
                                 SizedBox(height: 8.h),
@@ -319,6 +450,7 @@ class _EmployerCompanyDetailsScreenState
                                   child: TextField(
                                     controller: _workEmailController,
                                     keyboardType: TextInputType.emailAddress,
+                                    readOnly: widget.verifiedEmail != null && !_isEmailEditable,
                                     style: TextStyle(
                                       fontSize: 14.sp,
                                       color: Colors.black,
@@ -329,17 +461,16 @@ class _EmployerCompanyDetailsScreenState
                                         color: Colors.grey[600],
                                         size: 20.sp,
                                       ),
-                                      suffixIcon: TextButton(
-                                        onPressed: () {},
-                                        child: Text(
-                                          'Edit',
-                                          style: TextStyle(
-                                            fontSize: 14.sp,
-                                            color: AppColors.primaryColor,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
+                                      suffixIcon: widget.verifiedEmail != null && !_isEmailEditable
+                                          ? Padding(
+                                              padding: EdgeInsets.only(right: 8.w),
+                                              child: Icon(
+                                                Icons.verified,
+                                                color: Colors.green,
+                                                size: 18.sp,
+                                              ),
+                                            )
+                                          : null,
                                       border: InputBorder.none,
                                       contentPadding: EdgeInsets.symmetric(
                                         horizontal: 16.w,
@@ -673,6 +804,137 @@ class _EmployerCompanyDetailsScreenState
                                     ),
                                   ),
                                 ),
+                                // Autocomplete suggestions
+                                if (_locationPredictions.isNotEmpty) ...[
+                                  SizedBox(height: 8.h),
+                                  Container(
+                                    constraints: BoxConstraints(maxHeight: 200.h),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(12.r),
+                                      border: Border.all(color: Colors.grey[300]!),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.1),
+                                          blurRadius: 10,
+                                          offset: Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ListView.builder(
+                                      shrinkWrap: true,
+                                      physics: ClampingScrollPhysics(),
+                                      primary: false,
+                                      itemCount: _locationPredictions.length,
+                                      itemBuilder: (context, index) {
+                                        final prediction = _locationPredictions[index];
+                                        final description = prediction['description']?.toString() ?? '';
+                                        
+                                        return Material(
+                                          color: Colors.transparent,
+                                          child: InkWell(
+                                            onTap: () {
+                                              print('👆 Location tapped: $description');
+                                              _selectLocation(prediction);
+                                            },
+                                            child: Container(
+                                              width: double.infinity,
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 16.w,
+                                                vertical: 12.h,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                border: Border(
+                                                  bottom: BorderSide(
+                                                    color: Colors.grey[200]!,
+                                                    width: index < _locationPredictions.length - 1 ? 1 : 0,
+                                                  ),
+                                                ),
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Icon(
+                                                    Icons.location_on,
+                                                    size: 20.sp,
+                                                    color: AppColors.primaryColor,
+                                                  ),
+                                                  SizedBox(width: 12.w),
+                                                  Expanded(
+                                                    child: Text(
+                                                      description,
+                                                      style: TextStyle(
+                                                        fontSize: 14.sp,
+                                                        color: Colors.black,
+                                                      ),
+                                                      maxLines: 2,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ),
+                          SizedBox(height: 16.h),
+                          // Social media links
+                          Container(
+                            padding: EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(15.r),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                // Heading
+                                Text(
+                                  'Social media links',
+                                  style: TextStyle(
+                                    fontSize: 14.sp,
+                                    fontWeight: FontWeight.w500,
+                                    color: Colors.black,
+                                  ),
+                                ),
+                                SizedBox(height: 12.h),
+                                // Website
+                                _buildSocialLinkField(
+                                  controller: _websiteController,
+                                  label: 'Website',
+                                  hint: 'https://www.example.com',
+                                  icon: Icons.language,
+                                ),
+                                SizedBox(height: 12.h),
+                                // Facebook
+                                _buildSocialLinkField(
+                                  controller: _facebookController,
+                                  label: 'Facebook link',
+                                  hint: 'https://www.facebook.com/yourpage',
+                                  icon: Icons.facebook,
+                                ),
+                                SizedBox(height: 12.h),
+                                // LinkedIn
+                                _buildSocialLinkField(
+                                  controller: _linkedinController,
+                                  label: 'LinkedIn link',
+                                  hint: 'https://www.linkedin.com/company/yourcompany',
+                                  icon: Icons.business,
+                                ),
+                                SizedBox(height: 12.h),
+                                // Instagram
+                                _buildSocialLinkField(
+                                  controller: _instagramController,
+                                  label: 'Instagram link',
+                                  hint: 'https://www.instagram.com/yourpage',
+                                  icon: Icons.camera_alt_outlined,
+                                ),
                               ],
                             ),
                           ),
@@ -761,7 +1023,23 @@ class _EmployerCompanyDetailsScreenState
                           // Continue button
                           GestureDetector(
                             onTap: () {
-                              Get.to(() => EmployerLogoScreen());
+                              if (_validateForm()) {
+                                Get.to(() => EmployerLogoScreen(
+                                  companyData: {
+                                    'email': widget.verifiedEmail ?? '',
+                                    'companyName': _companyNameController.text.trim(),
+                                    'fullName': _fullNameController.text.trim(),
+                                    'yourRole': _roleController.text.trim(),
+                                    'companySize': _selectedCompanySize,
+                                    'monthlyHiring': _selectedHiringVolume,
+                                    'companyLocation': _locationController.text.trim(),
+                                    'companyWebsite': _websiteController.text.trim(),
+                                    'fbLink': _facebookController.text.trim(),
+                                    'linkedinLink': _linkedinController.text.trim(),
+                                    'instagramLink': _instagramController.text.trim(),
+                                  },
+                                ));
+                              }
                             },
                             child: Container(
                               width: double.infinity,
@@ -815,6 +1093,58 @@ class _EmployerCompanyDetailsScreenState
     );
   }
 
+  bool _validateForm() {
+    // Validate company name
+    if (_companyNameController.text.trim().isEmpty) {
+      Get.snackbar(
+        'Validation Error',
+        'Company name is required',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return false;
+    }
+
+    // Validate email
+    if (widget.verifiedEmail == null || widget.verifiedEmail!.isEmpty) {
+      Get.snackbar(
+        'Validation Error',
+        'Email is required',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return false;
+    }
+
+    // Validate full name
+    if (_fullNameController.text.trim().isEmpty) {
+      Get.snackbar(
+        'Validation Error',
+        'Your full name is required',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return false;
+    }
+
+    // Validate terms
+    if (!_confirmTerms) {
+      Get.snackbar(
+        'Validation Error',
+        'Please confirm the terms and conditions',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return false;
+    }
+
+    return true;
+  }
+
   Widget _buildChip(
     String label,
     String selectedValue,
@@ -838,6 +1168,59 @@ class _EmployerCompanyDetailsScreenState
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSocialLinkField({
+    required TextEditingController controller,
+    required String label,
+    required String hint,
+    required IconData icon,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 13.sp,
+            fontWeight: FontWeight.w500,
+            color: Colors.black,
+          ),
+        ),
+        SizedBox(height: 8.h),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[100],
+            borderRadius: BorderRadius.circular(20.r),
+          ),
+          child: TextField(
+            controller: controller,
+            keyboardType: TextInputType.url,
+            style: TextStyle(
+              fontSize: 14.sp,
+              color: Colors.black,
+            ),
+            decoration: InputDecoration(
+              prefixIcon: Icon(
+                icon,
+                color: Colors.grey[600],
+                size: 20.sp,
+              ),
+              hintText: hint,
+              hintStyle: TextStyle(
+                fontSize: 14.sp,
+                color: Colors.grey[400],
+              ),
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 16.w,
+                vertical: 14.h,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

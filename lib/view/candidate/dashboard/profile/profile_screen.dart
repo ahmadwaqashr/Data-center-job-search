@@ -30,6 +30,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoadingExperiences = true;
   Map<String, dynamic>? _skillsPreferences;
   bool _isLoadingSkillsPreferences = true;
+  String? _userRole; // Store user role
   final Dio _dio = Dio();
 
   @override
@@ -39,11 +40,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _loadAllData() async {
-    await Future.wait([
-      _loadUserData(),
-      _fetchExperiences(),
-      _fetchSkillsPreferences(),
-    ]);
+    await _loadUserData();
+    // Only fetch experiences and skills preferences for candidates
+    if (_userRole == 'candidate') {
+      await Future.wait([
+        _fetchExperiences(),
+        _fetchSkillsPreferences(),
+      ]);
+    }
   }
 
   // Method to reload all data (called when returning from child screens)
@@ -58,6 +62,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
       print('📥 Loading user data from SharedPreferences...');
       final prefs = await SharedPreferences.getInstance();
       
+      // Get user role
+      _userRole = prefs.getString('user_role');
+      print('   User Role: ${_userRole ?? "NULL"}');
+      
       final userDataString = prefs.getString('user_data');
       if (userDataString != null) {
         final userData = jsonDecode(userDataString) as Map<String, dynamic>;
@@ -66,10 +74,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
         print('   Email: ${userData['email']}');
         print('   Phone: ${userData['phone']}');
         print('   Location: ${userData['location']}');
+        print('   Company Location: ${userData['companyLocation']}');
         print('   Profile Pic: ${userData['profilePic']}');
         print('   Percentage: ${userData['percentage']}');
         print('   Experties: ${userData['experties']}');
         print('   Experienced: ${userData['experienced']}');
+        if (_userRole == 'employer') {
+          print('   Company Name: ${userData['companyName']}');
+          print('   Your Role: ${userData['yourRole']}');
+          print('   Company Size: ${userData['companySize']}');
+        }
         
         setState(() {
           _userData = userData;
@@ -597,83 +611,127 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       SizedBox(height: 20.h),
                       // Profile completion card
-                      Container(
-                        padding: EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [Color(0xFF0F172A), Color(0xFF1E40AF)],
-                            stops: [0.04, 0.92],
-                          ),
-                          borderRadius: BorderRadius.circular(20.r),
-                        ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Candidate profile',
-                                    style: TextStyle(
-                                      fontSize: 14.sp,
-                                      color: Colors.white.withOpacity(0.9),
-                                    ),
-                                  ),
-                                  SizedBox(height: 8.h),
-                                  Text(
-                              '${_userData?['percentage'] ?? 0}% complete',
-                                    style: TextStyle(
-                                      fontSize: 24.sp,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  SizedBox(height: 8.h),
-                                  Text(
-                                    'Finish your skills and preferences to get better job matches.',
-                                    style: TextStyle(
-                                      fontSize: 13.sp,
-                                      color: Colors.white.withOpacity(0.8),
-                                      height: 1.4,
-                                    ),
-                                  ),
-                                  SizedBox(height: 12.h),
-                                  Container(
-                                    padding: EdgeInsets.symmetric(
-                                      horizontal: 12.w,
-                                      vertical: 6.h,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black.withOpacity(0.3),
-                                      borderRadius: BorderRadius.circular(20.r),
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Flexible(
-                                          child: Text(
-                                            '+18% visibility when profile is complete',
-                                            style: TextStyle(
-                                              fontSize: 10.sp,
-                                              color: Colors.white,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        SizedBox(width: 6.w),
-                                        Container(
-                                          width: 4.w,
-                                          height: 4.h,
-                                          decoration: BoxDecoration(
-                                            color: Color(0xFF10B981),
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                      if (_userRole == 'candidate')
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [Color(0xFF0F172A), Color(0xFF1E40AF)],
+                              stops: [0.04, 0.92],
                             ),
-                          ],
+                            borderRadius: BorderRadius.circular(20.r),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Candidate profile',
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  color: Colors.white.withOpacity(0.9),
+                                ),
+                              ),
+                              SizedBox(height: 8.h),
+                              Text(
+                                '${_userData?['percentage'] ?? 0}% complete',
+                                style: TextStyle(
+                                  fontSize: 24.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              SizedBox(height: 8.h),
+                              Text(
+                                'Finish your skills and preferences to get better job matches.',
+                                style: TextStyle(
+                                  fontSize: 13.sp,
+                                  color: Colors.white.withOpacity(0.8),
+                                  height: 1.4,
+                                ),
+                              ),
+                              SizedBox(height: 12.h),
+                              Container(
+                                padding: EdgeInsets.symmetric(
+                                  horizontal: 12.w,
+                                  vertical: 6.h,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(20.r),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Flexible(
+                                      child: Text(
+                                        '+18% visibility when profile is complete',
+                                        style: TextStyle(
+                                          fontSize: 10.sp,
+                                          color: Colors.white,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    SizedBox(width: 6.w),
+                                    Container(
+                                      width: 4.w,
+                                      height: 4.h,
+                                      decoration: BoxDecoration(
+                                        color: Color(0xFF10B981),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (_userRole == 'employer')
+                        Container(
+                          padding: EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [Color(0xFF0F172A), Color(0xFF1E40AF)],
+                              stops: [0.04, 0.92],
+                            ),
+                            borderRadius: BorderRadius.circular(20.r),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Employer profile',
+                                style: TextStyle(
+                                  fontSize: 14.sp,
+                                  color: Colors.white.withOpacity(0.9),
+                                ),
+                              ),
+                              SizedBox(height: 8.h),
+                              Text(
+                                '${_userData?['percentage'] ?? 0}% complete',
+                                style: TextStyle(
+                                  fontSize: 24.sp,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              SizedBox(height: 8.h),
+                              Text(
+                                'Complete your company profile to attract top talent.',
+                                style: TextStyle(
+                                  fontSize: 13.sp,
+                                  color: Colors.white.withOpacity(0.8),
+                                  height: 1.4,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
                       SizedBox(height: 20.h),
                       // Contact & basics
                       Container(
@@ -750,10 +808,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             SizedBox(height: 12.h),
                             _buildContactItem(
                               icon: Icons.location_on_outlined,
-                              label: 'Location',
-                              value: _userData?['location'] ?? 'Not set',
-                              subtitle: 'Open to roles within 25 miles radius',
-                              showBadge: true,
+                              label: _userRole == 'employer' ? 'Company location' : 'Location',
+                              value: _userRole == 'employer' 
+                                  ? (_userData?['companyLocation'] ?? 'Not set')
+                                  : (_userData?['location'] ?? 'Not set'),
+                              subtitle: _userRole == 'employer' 
+                                  ? null 
+                                  : 'Open to roles within 25 miles radius',
+                              showBadge: _userRole == 'candidate',
                             ),
                           ],
                         ),
@@ -888,9 +950,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                       ),
-                      SizedBox(height: 16.h),
-                      // Experience
-                      Container(
+                      if (_userRole == 'candidate') ...[
+                        SizedBox(height: 16.h),
+                        // Experience
+                        Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white,
@@ -1000,9 +1063,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                       ),
-                      SizedBox(height: 16.h),
-                      // Skills & preferences
-                      Container(
+                        SizedBox(height: 16.h),
+                        // Skills & preferences
+                        Container(
                         padding: EdgeInsets.all(16),
                         decoration: BoxDecoration(
                           color: Colors.white,
@@ -1092,6 +1155,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ],
                         ),
                       ),
+                      ],
                       SizedBox(height: 16.h),
                       // Account & settings
                       Container(

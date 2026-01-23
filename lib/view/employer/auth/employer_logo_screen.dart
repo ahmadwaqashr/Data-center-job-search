@@ -1,20 +1,268 @@
+import 'dart:io';
+import 'dart:convert';
 import 'package:data_center_job/utils/custom_button.dart';
 import 'package:data_center_job/view/employer/auth/employer_under_review_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
-import 'package:get/get.dart';
+import 'package:get/get.dart' hide FormData, MultipartFile;
+import 'package:image_picker/image_picker.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../constants/colors.dart';
+import '../../../constants/api_config.dart';
 
 class EmployerLogoScreen extends StatefulWidget {
-  const EmployerLogoScreen({super.key});
+  final Map<String, String>? companyData;
+  
+  const EmployerLogoScreen({super.key, this.companyData});
 
   @override
   State<EmployerLogoScreen> createState() => _EmployerLogoScreenState();
 }
 
 class _EmployerLogoScreenState extends State<EmployerLogoScreen> {
-  bool _hasLogo = false;
+  final ImagePicker _imagePicker = ImagePicker();
+  final Dio _dio = Dio();
+  File? _selectedLogo;
+  String? _companyInitials; // Store company initials for fallback
+  bool _isSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Initialize with default initials (can be updated from previous screen)
+    _companyInitials = 'AC';
+    // Extract initials from company name if available
+    if (widget.companyData != null && widget.companyData!['companyName'] != null) {
+      final companyName = widget.companyData!['companyName']!;
+      if (companyName.isNotEmpty) {
+        final words = companyName.trim().split(' ');
+        if (words.length >= 2) {
+          _companyInitials = '${words[0][0]}${words[1][0]}'.toUpperCase();
+        } else if (words.length == 1 && words[0].isNotEmpty) {
+          _companyInitials = words[0][0].toUpperCase();
+        }
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _dio.close();
+    super.dispose();
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final XFile? image = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 800,
+        maxHeight: 800,
+        imageQuality: 85,
+      );
+
+      if (image != null) {
+        setState(() {
+          _selectedLogo = File(image.path);
+        });
+        print('✅ Logo selected: ${_selectedLogo!.path}');
+      }
+    } catch (e) {
+      print('❌ Error picking image: $e');
+      Get.snackbar(
+        'Error',
+        'Failed to pick image: ${e.toString()}',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+    }
+  }
+
+  void _showImageSourceDialog() {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(
+            'Select Image Source',
+            style: TextStyle(
+              fontSize: 18.sp,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: Icon(Icons.camera_alt, color: AppColors.primaryColor),
+                title: Text('Camera'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: Icon(Icons.photo_library, color: AppColors.primaryColor),
+                title: Text('Gallery'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _submitEmployerSignup() async {
+    if (widget.companyData == null) {
+      Get.snackbar(
+        'Error',
+        'Company data is missing',
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+      );
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+    });
+
+    try {
+      print('📤 Submitting employer signup...');
+      
+      // Prepare FormData
+      final formData = FormData.fromMap({
+        'role': 'employer',
+        'email': widget.companyData!['email'] ?? '',
+        'companyName': widget.companyData!['companyName'] ?? '',
+        'fullName': widget.companyData!['fullName'] ?? '',
+        'yourRole': widget.companyData!['yourRole'] ?? '',
+        'companySize': widget.companyData!['companySize'] ?? '',
+        'monthlyHiring': widget.companyData!['monthlyHiring'] ?? '',
+        'companyLocation': widget.companyData!['companyLocation'] ?? '',
+        'companyWebsite': widget.companyData!['companyWebsite'] ?? '',
+        'fbLink': widget.companyData!['fbLink'] ?? '',
+        'linkedinLink': widget.companyData!['linkedinLink'] ?? '',
+        'instagramLink': widget.companyData!['instagramLink'] ?? '',
+      });
+
+      // Add logo file if selected (as profilePic)
+      if (_selectedLogo != null) {
+        final fileName = _selectedLogo!.path.split('/').last;
+        formData.files.add(
+          MapEntry(
+            'profilePic',
+            await MultipartFile.fromFile(
+              _selectedLogo!.path,
+              filename: fileName,
+            ),
+          ),
+        );
+        print('📎 Logo file added as profilePic: $fileName');
+      }
+
+      print('📤 API Request:');
+      print('   URL: ${ApiConfig.getUrl(ApiConfig.candidateSignup)}');
+      print('   Email: ${widget.companyData!['email']}');
+      print('   Company: ${widget.companyData!['companyName']}');
+
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.candidateSignup),
+        options: Options(
+          method: 'POST',
+        ),
+        data: formData,
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        print('✅ Signup successful:');
+        print('   Response: ${jsonEncode(responseData)}');
+
+        // Save user data to SharedPreferences
+        await _saveUserData(responseData);
+
+        setState(() {
+          _isSubmitting = false;
+        });
+
+        // Navigate to under review screen
+        Get.offAll(() => EmployerUnderReviewScreen());
+      } else {
+        throw Exception('Signup failed: ${response.statusMessage}');
+      }
+    } catch (e) {
+      print('❌ Signup error: $e');
+      setState(() {
+        _isSubmitting = false;
+      });
+
+      String errorMessage = 'Failed to complete signup';
+      if (e is DioException) {
+        if (e.response != null) {
+          errorMessage = e.response!.data['message'] ?? 
+                        e.response!.data['error'] ?? 
+                        errorMessage;
+        } else {
+          errorMessage = e.message ?? errorMessage;
+        }
+      } else {
+        errorMessage = e.toString();
+      }
+
+      Get.snackbar(
+        'Signup Failed',
+        errorMessage,
+        snackPosition: SnackPosition.BOTTOM,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        duration: Duration(seconds: 4),
+      );
+    }
+  }
+
+  Future<void> _saveUserData(Map<String, dynamic> userData) async {
+    try {
+      print('💾 Saving employer data to SharedPreferences...');
+      final prefs = await SharedPreferences.getInstance();
+      
+      // Save all user data as JSON
+      await prefs.setString('user_data', jsonEncode(userData));
+      print('   ✅ user_data saved');
+      
+      // Save individual important fields for easy access
+      if (userData['token'] != null) {
+        await prefs.setString('auth_token', userData['token']);
+        print('   ✅ auth_token saved');
+      }
+      if (userData['id'] != null) {
+        await prefs.setString('user_id', userData['id'].toString());
+        print('   ✅ user_id saved: ${userData['id']}');
+      }
+      if (userData['email'] != null) {
+        await prefs.setString('user_email', userData['email']);
+        print('   ✅ user_email saved: ${userData['email']}');
+      }
+      if (userData['fullName'] != null) {
+        await prefs.setString('user_name', userData['fullName']);
+        print('   ✅ user_name saved: ${userData['fullName']}');
+      }
+      // Always save role as 'employer'
+      await prefs.setString('user_role', 'employer');
+      print('   ✅ user_role saved: employer');
+      
+      print('✅ All employer data saved to SharedPreferences successfully');
+    } catch (e) {
+      print('❌ Error saving user data: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -199,41 +447,68 @@ class _EmployerLogoScreenState extends State<EmployerLogoScreen> {
                               children: [
                                 // Logo preview circle
                                 Container(
-                                  height: 95..h,
-                                  width: 95..w,
+                                  height: 95.h,
+                                  width: 95.w,
                                   decoration: BoxDecoration(
                                     color: Colors.grey.withOpacity(.15),
                                     shape: BoxShape.circle
                                   ),
                                   child: Center(
                                     child: Container(
-                                      height: 70..h,
-                                      width: 70..w,
+                                      height: 70.h,
+                                      width: 70.w,
                                       decoration: BoxDecoration(
-                                          color: Colors.white,
-                                          shape: BoxShape.circle
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withOpacity(0.1),
+                                            blurRadius: 4,
+                                            offset: Offset(0, 2),
+                                          ),
+                                        ],
                                       ),
-                                      child: Center(
-                                        child: Container(
-                                          width: 40.w,
-                                          height: 40.h,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.primaryColor,
-                                            borderRadius: BorderRadius.circular(
-                                              15.r,
-                                            ),
-                                          ),
-                                          child: Center(
-                                            child: Text(
-                                              'AC',
-                                              style: TextStyle(
-                                                fontSize: 18.sp,
-                                                fontWeight: FontWeight.bold,
-                                                color: Colors.white,
+                                      child: ClipOval(
+                                        child: _selectedLogo != null
+                                            ? Image.file(
+                                                _selectedLogo!,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) {
+                                                  // Fallback to initials if image fails to load
+                                                  return Container(
+                                                    decoration: BoxDecoration(
+                                                      color: AppColors.primaryColor,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                    child: Center(
+                                                      child: Text(
+                                                        _companyInitials ?? 'AC',
+                                                        style: TextStyle(
+                                                          fontSize: 18.sp,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.white,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  );
+                                                },
+                                              )
+                                            : Container(
+                                                decoration: BoxDecoration(
+                                                  color: AppColors.primaryColor,
+                                                  shape: BoxShape.circle,
+                                                ),
+                                                child: Center(
+                                                  child: Text(
+                                                    _companyInitials ?? 'AC',
+                                                    style: TextStyle(
+                                                      fontSize: 18.sp,
+                                                      fontWeight: FontWeight.bold,
+                                                      color: Colors.white,
+                                                    ),
+                                                  ),
+                                                ),
                                               ),
-                                            ),
-                                          ),
-                                        ),
                                       ),
                                     ),
                                   ),
@@ -253,8 +528,7 @@ class _EmployerLogoScreenState extends State<EmployerLogoScreen> {
                                 // Upload logo button
                                 GestureDetector(
                                   onTap: () {
-                                    // TODO: Implement file picker
-                                    setState(() => _hasLogo = true);
+                                    _showImageSourceDialog();
                                   },
                                   child: Container(
                                     width: double.infinity,
@@ -274,7 +548,7 @@ class _EmployerLogoScreenState extends State<EmployerLogoScreen> {
                                         ),
                                         SizedBox(width: 8.w),
                                         Text(
-                                          'Upload logo',
+                                          _selectedLogo != null ? 'Change logo' : 'Upload logo',
                                           style: TextStyle(
                                             fontSize: 15.sp,
                                             fontWeight: FontWeight.w600,
@@ -286,42 +560,84 @@ class _EmployerLogoScreenState extends State<EmployerLogoScreen> {
                                   ),
                                 ),
 
-                                SizedBox(height: 12.h),
-                                // Use different image button
-                                GestureDetector(
-                                  onTap: () {
-                                    // TODO: Implement file picker
-                                    setState(() => _hasLogo = true);
-                                  },
-                                  child: Container(
-                                    width: double.infinity,
-                                    height: 50.h,
-                                    decoration: BoxDecoration(
-                                      color: Colors.grey.withOpacity(.1),
-                                      borderRadius: BorderRadius.circular(25.r),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.image_outlined,
-                                          color: Colors.grey[700],
-                                          size: 18.sp,
-                                        ),
-                                        SizedBox(width: 6.w),
-                                        Text(
-                                          'Use different image',
-                                          style: TextStyle(
-                                            fontSize: 14.sp,
+                                if (_selectedLogo != null) ...[
+                                  SizedBox(height: 12.h),
+                                  // Use different image button
+                                  GestureDetector(
+                                    onTap: () {
+                                      _showImageSourceDialog();
+                                    },
+                                    child: Container(
+                                      width: double.infinity,
+                                      height: 50.h,
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.withOpacity(.1),
+                                        borderRadius: BorderRadius.circular(25.r),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.image_outlined,
                                             color: Colors.grey[700],
-                                            fontWeight: FontWeight.w500,
+                                            size: 18.sp,
                                           ),
-                                        ),
-                                      ],
+                                          SizedBox(width: 6.w),
+                                          Text(
+                                            'Use different image',
+                                            style: TextStyle(
+                                              fontSize: 14.sp,
+                                              color: Colors.grey[700],
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
-                                ),
+                                  SizedBox(height: 12.h),
+                                  // Remove logo button
+                                  GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedLogo = null;
+                                      });
+                                    },
+                                    child: Container(
+                                      width: double.infinity,
+                                      height: 50.h,
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.withOpacity(.1),
+                                        borderRadius: BorderRadius.circular(25.r),
+                                        border: Border.all(
+                                          color: Colors.red.withOpacity(.3),
+                                          width: 1,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.delete_outline,
+                                            color: Colors.red,
+                                            size: 18.sp,
+                                          ),
+                                          SizedBox(width: 6.w),
+                                          Text(
+                                            'Remove logo',
+                                            style: TextStyle(
+                                              fontSize: 14.sp,
+                                              color: Colors.red,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                                 SizedBox(height: 8.h),
                                 // Recommendation text
                                 Container(
@@ -409,8 +725,8 @@ class _EmployerLogoScreenState extends State<EmployerLogoScreen> {
                                 SizedBox(height: 20.h),
                                 // Save & continue button
                                 GestureDetector(
-                                  onTap: () {
-                                    Get.to(() => EmployerUnderReviewScreen());
+                                  onTap: _isSubmitting ? null : () async {
+                                    await _submitEmployerSignup();
                                   },
                                   child: Container(
                                     width: double.infinity,
@@ -420,40 +736,48 @@ class _EmployerLogoScreenState extends State<EmployerLogoScreen> {
                                       borderRadius: BorderRadius.circular(25.r),
                                     ),
                                     alignment: Alignment.center,
-                                    child: Row(
-                                      mainAxisAlignment:
-                                      MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          'Save & Continue',
-                                          style: TextStyle(
-                                            fontSize: 15.sp,
-                                            fontWeight: FontWeight.w600,
-                                            color: Colors.white,
+                                    child: _isSubmitting
+                                        ? Padding(
+                                            padding: EdgeInsets.all(12.h),
+                                            child: CircularProgressIndicator(
+                                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                              strokeWidth: 2,
+                                            ),
+                                          )
+                                        : Row(
+                                            mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                            children: [
+                                              Text(
+                                                'Save & Continue',
+                                                style: TextStyle(
+                                                  fontSize: 15.sp,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.white,
+                                                ),
+                                              ),
+                                              SizedBox(width: 10.w),
+                                              Container(
+                                                height: 18.h,
+                                                width: 18.w,
+                                                decoration: BoxDecoration(
+                                                  shape: BoxShape.circle,
+                                                  color: Color(0xFF2052C1),
+                                                ),
+                                                child: Icon(
+                                                  Icons.arrow_forward_sharp,
+                                                  color: Colors.white,
+                                                  size: 10,
+                                                ),
+                                              ),
+                                            ],
                                           ),
-                                        ),
-                                        SizedBox(width: 10.w),
-                                        Container(
-                                          height: 18.h,
-                                          width: 18.w,
-                                          decoration: BoxDecoration(
-                                            shape: BoxShape.circle,
-                                            color: Color(0xFF2052C1),
-                                          ),
-                                          child: Icon(
-                                            Icons.arrow_forward_sharp,
-                                            color: Colors.white,
-                                            size: 10,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
                                   ),
                                 ),
                                 // Skip for now button
                                 TextButton(
-                                  onPressed: () {
-                                    Get.to(() => EmployerUnderReviewScreen());
+                                  onPressed: _isSubmitting ? null : () async {
+                                    await _submitEmployerSignup();
                                   },
                                   child: Text(
                                     'Skip for now',
