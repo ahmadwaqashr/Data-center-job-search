@@ -16,6 +16,9 @@ class ApiConfig {
   static const String fetchSkillsPreferences = '/api/skills/fetch_skills_prefrences';
   static const String sendEmailOTP = '/api/auth/send-email-otp';
   static const String verifyEmailOTP = '/api/auth/verify-email-otp';
+  static const String fetchQuestionsByCoreId = '/api/testquestion/fetch_questionbycoreid';
+  static const String createTestQuestion = '/api/testquestion';
+  static const String jobPosted = '/api/jobposted';
   
   // Helper method to get edit skills URL with ID
   static String getEditSkillsUrl(int id) {

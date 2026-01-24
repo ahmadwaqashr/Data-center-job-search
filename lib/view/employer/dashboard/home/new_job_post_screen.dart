@@ -14,24 +14,20 @@ class NewJobPostScreen extends StatefulWidget {
 
 class _NewJobPostScreenState extends State<NewJobPostScreen> {
   final TextEditingController _jobTitleController = TextEditingController();
-  final TextEditingController _companyController = TextEditingController(
-    text: 'EdgeCore Systems',
-  );
-  final TextEditingController _locationController = TextEditingController(
-    text: 'Seattle, WA • On-site',
-  );
-  final TextEditingController _minPayController = TextEditingController(
-    text: '38000',
-  );
-  final TextEditingController _maxPayController = TextEditingController(
-    text: '45000',
-  );
+  final TextEditingController _companyController = TextEditingController();
+  final TextEditingController _locationController = TextEditingController();
+  final TextEditingController _minPayController = TextEditingController();
+  final TextEditingController _maxPayController = TextEditingController();
   final TextEditingController _jobDescriptionController =
       TextEditingController();
   final TextEditingController _requirementsController = TextEditingController();
+  final TextEditingController _skillSearchController = TextEditingController();
+  final TextEditingController _shiftSearchController = TextEditingController();
+  final TextEditingController _benefitSearchController = TextEditingController();
 
   String selectedWorkType = 'Full-time';
   String selectedLocationType = 'On-site';
+  String selectedSalaryType = 'Monthly';
 
   List<String> shifts = [
     'Night shifts',
@@ -40,16 +36,15 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
     'Weekend shifts',
   ];
   String? selectedShift;
+  String _shiftSearchQuery = '';
 
-  List<String> skills = [
-    'Data center operations',
-    'Rack & stack',
-    'Fiber & cabling',
-    'Troubleshooting',
-    'DCIM tools',
-    'Ticketing systems',
-  ];
+  List<String> skills = [];
   List<String> selectedSkills = [];
+  String _skillSearchQuery = '';
+
+  List<String> benefits = [];
+  String _benefitSearchQuery = '';
+  List<String> selectedBenefits = [];
 
   @override
   void dispose() {
@@ -60,7 +55,89 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
     _maxPayController.dispose();
     _jobDescriptionController.dispose();
     _requirementsController.dispose();
+    _skillSearchController.dispose();
+    _shiftSearchController.dispose();
+    _benefitSearchController.dispose();
     super.dispose();
+  }
+
+  void _addShiftFromSearch() {
+    final value = _shiftSearchController.text.trim();
+    if (value.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please enter a shift to add',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
+    final exists =
+        shifts.any((shift) => shift.toLowerCase() == value.toLowerCase());
+    setState(() {
+      if (!exists) {
+        shifts.add(value);
+      }
+      selectedShift = value;
+      _shiftSearchController.clear();
+      _shiftSearchQuery = '';
+    });
+  }
+
+  void _addSkillFromSearch() {
+    final value = _skillSearchController.text.trim();
+    if (value.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please enter a skill to add',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
+    final exists =
+        skills.any((skill) => skill.toLowerCase() == value.toLowerCase());
+    setState(() {
+      if (!exists) {
+        skills.add(value);
+      }
+      if (!selectedSkills.contains(value)) {
+        selectedSkills.add(value);
+      }
+      _skillSearchController.clear();
+      _skillSearchQuery = '';
+    });
+  }
+
+  void _addBenefitFromSearch() {
+    final value = _benefitSearchController.text.trim();
+    if (value.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please enter a benefit to add',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
+    final exists =
+        benefits.any((benefit) => benefit.toLowerCase() == value.toLowerCase());
+    setState(() {
+      if (!exists) {
+        benefits.add(value);
+      }
+      if (!selectedBenefits.contains(value)) {
+        selectedBenefits.add(value);
+      }
+      _benefitSearchController.clear();
+      _benefitSearchQuery = '';
+    });
   }
 
   bool get isJobTitleFilled => _jobTitleController.text.isNotEmpty;
@@ -68,6 +145,119 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
   bool get isPayRangeFilled =>
       _minPayController.text.isNotEmpty && _maxPayController.text.isNotEmpty;
   bool get isJobDescriptionFilled => _jobDescriptionController.text.isNotEmpty;
+
+  bool _validateJobPost() {
+    final title = _jobTitleController.text.trim();
+    final company = _companyController.text.trim();
+    final location = _locationController.text.trim();
+    final description = _jobDescriptionController.text.trim();
+    final requirements = _requirementsController.text.trim();
+    final minPay = double.tryParse(_minPayController.text.trim());
+    final maxPay = double.tryParse(_maxPayController.text.trim());
+
+    if (title.isEmpty || title.length < 3) {
+      Get.snackbar(
+        'Error',
+        'Job title is required (min 3 characters)',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (company.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Company name is required',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (location.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Location is required',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (minPay == null || minPay <= 0) {
+      Get.snackbar(
+        'Error',
+        'Minimum pay must be a valid number',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (maxPay == null || maxPay <= 0) {
+      Get.snackbar(
+        'Error',
+        'Maximum pay must be a valid number',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (maxPay < minPay) {
+      Get.snackbar(
+        'Error',
+        'Max pay must be greater than or equal to min pay',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (description.length < 30) {
+      Get.snackbar(
+        'Error',
+        'Job description must be at least 30 characters',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (requirements.isEmpty || requirements.length < 10) {
+      Get.snackbar(
+        'Error',
+        'Requirements are required (min 10 characters)',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (selectedSkills.isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please add at least one skill',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (selectedShift == null || selectedShift!.trim().isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please select a shift',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+
+    return true;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -473,6 +663,111 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                                   ],
                                 ),
                                 SizedBox(height: 20.h),
+                                // Salary type
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Salary type',
+                                      style: TextStyle(
+                                        fontSize: 14.sp,
+                                        color: Colors.black,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    SizedBox(width: 8.w),
+                                    Text(
+                                      'Required',
+                                      style: TextStyle(
+                                        fontSize: 13.sp,
+                                        color: Colors.grey[500],
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 12.h),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            selectedSalaryType = 'Monthly';
+                                          });
+                                        },
+                                        child: Container(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 16.w,
+                                            vertical: 12.h,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: selectedSalaryType == 'Monthly'
+                                                ? AppColors.primaryColor.withOpacity(0.1)
+                                                : Colors.grey[50],
+                                            borderRadius: BorderRadius.circular(10.r),
+                                            border: Border.all(
+                                              color: selectedSalaryType == 'Monthly'
+                                                  ? AppColors.primaryColor
+                                                  : Colors.transparent,
+                                            ),
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              'Monthly',
+                                              style: TextStyle(
+                                                fontSize: 14.sp,
+                                                color: selectedSalaryType == 'Monthly'
+                                                    ? AppColors.primaryColor
+                                                    : Colors.black,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    SizedBox(width: 12.w),
+                                    Expanded(
+                                      child: GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            selectedSalaryType = 'Hr';
+                                          });
+                                        },
+                                        child: Container(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 16.w,
+                                            vertical: 12.h,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: selectedSalaryType == 'Hr'
+                                                ? AppColors.primaryColor.withOpacity(0.1)
+                                                : Colors.grey[50],
+                                            borderRadius: BorderRadius.circular(10.r),
+                                            border: Border.all(
+                                              color: selectedSalaryType == 'Hr'
+                                                  ? AppColors.primaryColor
+                                                  : Colors.transparent,
+                                            ),
+                                          ),
+                                          child: Center(
+                                            child: Text(
+                                              'Hr',
+                                              style: TextStyle(
+                                                fontSize: 14.sp,
+                                                color: selectedSalaryType == 'Hr'
+                                                    ? AppColors.primaryColor
+                                                    : Colors.black,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                SizedBox(height: 20.h),
                                 // Pay range
                                 Row(
                                   mainAxisAlignment:
@@ -596,14 +891,85 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                                         ),
                                       ),
                                       SizedBox(height: 12.h),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextField(
+                                              controller: _shiftSearchController,
+                                              onChanged: (value) {
+                                                setState(() {
+                                                  _shiftSearchQuery = value;
+                                                });
+                                              },
+                                              decoration: InputDecoration(
+                                                hintText: 'Search or type a shift...',
+                                                hintStyle: TextStyle(
+                                                  color: Colors.grey[400],
+                                                  fontSize: 13.sp,
+                                                ),
+                                                prefixIcon: Icon(
+                                                  Icons.search,
+                                                  color: Colors.grey[400],
+                                                  size: 18.sp,
+                                                ),
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                                border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10.r),
+                                                  borderSide: BorderSide.none,
+                                                ),
+                                                contentPadding: EdgeInsets.symmetric(
+                                                  horizontal: 12.w,
+                                                  vertical: 12.h,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          SizedBox(width: 10.w),
+                                          GestureDetector(
+                                            onTap: _addShiftFromSearch,
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 14.w,
+                                                vertical: 12.h,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryColor,
+                                                borderRadius:
+                                                    BorderRadius.circular(10.r),
+                                              ),
+                                              child: Text(
+                                                'Add',
+                                                style: TextStyle(
+                                                  fontSize: 13.sp,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(height: 12.h),
                                       Wrap(
                                         spacing: 8.w,
                                         runSpacing: 8.h,
                                         children: [
-                                          ...shifts.map(
-                                            (shift) => _buildShiftChip(shift),
+                                          ...shifts
+                                              .where((shift) {
+                                                if (_shiftSearchQuery.trim().isEmpty) {
+                                                  return true;
+                                                }
+                                                return shift
+                                                    .toLowerCase()
+                                                    .contains(_shiftSearchQuery.toLowerCase());
+                                              })
+                                              .map((shift) => _buildShiftChip(shift)),
+                                          _buildAddChip(
+                                            '+ Add shift',
+                                            onTap: _addShiftFromSearch,
                                           ),
-                                          _buildAddChip('+ Add shift'),
                                         ],
                                       ),
                                     ],
@@ -725,6 +1091,123 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                                   ),
                                 ),
                                 SizedBox(height: 20.h),
+                                // Benefits
+                                Text(
+                                  'Benefits',
+                                  style: TextStyle(
+                                    fontSize: 14.sp,
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                SizedBox(height: 12.h),
+                                Container(
+                                  padding: EdgeInsets.all(16),
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[50],
+                                    borderRadius: BorderRadius.circular(10.r),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Add benefits for this role',
+                                        style: TextStyle(
+                                          fontSize: 13.sp,
+                                          color: Colors.grey[600],
+                                        ),
+                                      ),
+                                      SizedBox(height: 12.h),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextField(
+                                              controller: _benefitSearchController,
+                                              onChanged: (value) {
+                                                setState(() {
+                                                  _benefitSearchQuery = value;
+                                                });
+                                              },
+                                              decoration: InputDecoration(
+                                                hintText: 'Search or type a benefit...',
+                                                hintStyle: TextStyle(
+                                                  color: Colors.grey[400],
+                                                  fontSize: 13.sp,
+                                                ),
+                                                prefixIcon: Icon(
+                                                  Icons.search,
+                                                  color: Colors.grey[400],
+                                                  size: 18.sp,
+                                                ),
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                                border: OutlineInputBorder(
+                                                  borderRadius:
+                                                      BorderRadius.circular(10.r),
+                                                  borderSide: BorderSide.none,
+                                                ),
+                                                contentPadding:
+                                                    EdgeInsets.symmetric(
+                                                  horizontal: 12.w,
+                                                  vertical: 12.h,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          SizedBox(width: 10.w),
+                                          GestureDetector(
+                                            onTap: _addBenefitFromSearch,
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 14.w,
+                                                vertical: 12.h,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryColor,
+                                                borderRadius:
+                                                    BorderRadius.circular(10.r),
+                                              ),
+                                              child: Text(
+                                                'Add',
+                                                style: TextStyle(
+                                                  fontSize: 13.sp,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(height: 12.h),
+                                      Wrap(
+                                        spacing: 8.w,
+                                        runSpacing: 8.h,
+                                        children: [
+                                          ...benefits
+                                              .where((benefit) {
+                                                if (_benefitSearchQuery
+                                                    .trim()
+                                                    .isEmpty) {
+                                                  return true;
+                                                }
+                                                return benefit
+                                                    .toLowerCase()
+                                                    .contains(_benefitSearchQuery
+                                                        .toLowerCase());
+                                              })
+                                              .map((benefit) => _buildBenefitChip(benefit)),
+                                          _buildAddChip(
+                                            '+ Add benefit',
+                                            onTap: _addBenefitFromSearch,
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                SizedBox(height: 20.h),
                                 // Key skills
                                 Text(
                                   'Key skills',
@@ -753,14 +1236,83 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                                         ),
                                       ),
                                       SizedBox(height: 12.h),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: TextField(
+                                              controller: _skillSearchController,
+                                              onChanged: (value) {
+                                                setState(() {
+                                                  _skillSearchQuery = value;
+                                                });
+                                              },
+                                              decoration: InputDecoration(
+                                                hintText: 'Search or type a skill...',
+                                                hintStyle: TextStyle(
+                                                  color: Colors.grey[400],
+                                                  fontSize: 13.sp,
+                                                ),
+                                                prefixIcon: Icon(
+                                                  Icons.search,
+                                                  color: Colors.grey[400],
+                                                  size: 18.sp,
+                                                ),
+                                                filled: true,
+                                                fillColor: Colors.white,
+                                                border: OutlineInputBorder(
+                                                  borderRadius: BorderRadius.circular(10.r),
+                                                  borderSide: BorderSide.none,
+                                                ),
+                                                contentPadding: EdgeInsets.symmetric(
+                                                  horizontal: 12.w,
+                                                  vertical: 12.h,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                          SizedBox(width: 10.w),
+                                          GestureDetector(
+                                            onTap: _addSkillFromSearch,
+                                            child: Container(
+                                              padding: EdgeInsets.symmetric(
+                                                horizontal: 14.w,
+                                                vertical: 12.h,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.primaryColor,
+                                                borderRadius: BorderRadius.circular(10.r),
+                                              ),
+                                              child: Text(
+                                                'Add',
+                                                style: TextStyle(
+                                                  fontSize: 13.sp,
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      SizedBox(height: 12.h),
                                       Wrap(
                                         spacing: 8.w,
                                         runSpacing: 8.h,
                                         children: [
-                                          ...skills.map(
-                                            (skill) => _buildSkillChip(skill),
+                                          ...skills
+                                              .where((skill) {
+                                                if (_skillSearchQuery.trim().isEmpty) {
+                                                  return true;
+                                                }
+                                                return skill
+                                                    .toLowerCase()
+                                                    .contains(_skillSearchQuery.toLowerCase());
+                                              })
+                                              .map((skill) => _buildSkillChip(skill)),
+                                          _buildAddChip(
+                                            '+ Add skill',
+                                            onTap: _addSkillFromSearch,
                                           ),
-                                          _buildAddChip('+ Add skill'),
                                         ],
                                       ),
                                       SizedBox(height: 12.h),
@@ -789,10 +1341,7 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                               children: [
                                 GestureDetector(
                                   onTap: () {
-                                    if (isJobTitleFilled &&
-                                        isCompanyFilled &&
-                                        isPayRangeFilled &&
-                                        isJobDescriptionFilled) {
+                                    if (_validateJobPost()) {
                                       // Navigate to skill test questions
                                       Get.to(
                                         () => SkillTestQuestionsScreen(
@@ -806,16 +1355,26 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                                           maxPay: _maxPayController.text,
                                           shiftType:
                                               selectedShift ?? 'Shift-based',
+                                          workType: selectedWorkType,
+                                          locationType: selectedLocationType,
+                                          salaryType: selectedSalaryType.toLowerCase(),
+                                          jobDescription:
+                                              _jobDescriptionController.text,
+                                          requirements:
+                                              _requirementsController.text,
+                                          skills: List<String>.from(
+                                            selectedSkills,
+                                          ),
+                                          shifts: selectedShift == null
+                                              ? []
+                                              : [selectedShift!],
+                                          benefits: List<String>.from(
+                                            selectedBenefits,
+                                          ),
                                         ),
                                       );
                                     } else {
-                                      Get.snackbar(
-                                        'Error',
-                                        'Please fill all required fields',
-                                        backgroundColor: Colors.red,
-                                        colorText: Colors.white,
-                                        snackPosition: SnackPosition.BOTTOM,
-                                      );
+                                      return;
                                     }
                                   },
                                   child: Container(
@@ -900,68 +1459,192 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
 
   Widget _buildShiftChip(String shift) {
     final isSelected = selectedShift == shift;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          selectedShift = isSelected ? null : shift;
-        });
-      },
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
-        decoration: BoxDecoration(
-          color:
-              isSelected
-                  ? AppColors.primaryColor.withOpacity(0.1)
-                  : Colors.grey[200],
-          borderRadius: BorderRadius.circular(16.r),
-        ),
-        child: Text(
-          shift,
-          style: TextStyle(
-            fontSize: 13.sp,
-            color: isSelected ? AppColors.primaryColor : Colors.black,
-            fontWeight: FontWeight.w500,
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              selectedShift = isSelected ? null : shift;
+            });
+          },
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
+            decoration: BoxDecoration(
+              color:
+                  isSelected
+                      ? AppColors.primaryColor.withOpacity(0.1)
+                      : Colors.grey[200],
+              borderRadius: BorderRadius.circular(16.r),
+            ),
+            child: Text(
+              shift,
+              style: TextStyle(
+                fontSize: 13.sp,
+                color: isSelected ? AppColors.primaryColor : Colors.black,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
         ),
-      ),
+        Positioned(
+          top: -6.h,
+          right: -6.w,
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                shifts.remove(shift);
+                if (selectedShift == shift) {
+                  selectedShift = null;
+                }
+              });
+            },
+            child: Container(
+              width: 16.w,
+              height: 16.h,
+              decoration: BoxDecoration(
+                color: Colors.black,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close,
+                size: 12.sp,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
   Widget _buildSkillChip(String skill) {
     final isSelected = selectedSkills.contains(skill);
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          if (isSelected) {
-            selectedSkills.remove(skill);
-          } else {
-            selectedSkills.add(skill);
-          }
-        });
-      },
-      child: Container(
-        padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
-        decoration: BoxDecoration(
-          color:
-              isSelected
-                  ? AppColors.primaryColor.withOpacity(0.1)
-                  : Colors.grey[200],
-          borderRadius: BorderRadius.circular(16.r),
-        ),
-        child: Text(
-          skill,
-          style: TextStyle(
-            fontSize: 13.sp,
-            color: isSelected ? AppColors.primaryColor : Colors.black,
-            fontWeight: FontWeight.w500,
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              if (isSelected) {
+                selectedSkills.remove(skill);
+              } else {
+                selectedSkills.add(skill);
+              }
+            });
+          },
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
+            decoration: BoxDecoration(
+              color:
+                  isSelected
+                      ? AppColors.primaryColor.withOpacity(0.1)
+                      : Colors.grey[200],
+              borderRadius: BorderRadius.circular(16.r),
+            ),
+            child: Text(
+              skill,
+              style: TextStyle(
+                fontSize: 13.sp,
+                color: isSelected ? AppColors.primaryColor : Colors.black,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
           ),
         ),
-      ),
+        Positioned(
+          top: -6.h,
+          right: -6.w,
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                skills.remove(skill);
+                selectedSkills.remove(skill);
+              });
+            },
+            child: Container(
+              width: 16.w,
+              height: 16.h,
+              decoration: BoxDecoration(
+                color: Colors.black,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close,
+                size: 12.sp,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildAddChip(String label) {
-    return Container(
+  Widget _buildBenefitChip(String benefit) {
+    final isSelected = selectedBenefits.contains(benefit);
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              if (isSelected) {
+                selectedBenefits.remove(benefit);
+              } else {
+                selectedBenefits.add(benefit);
+              }
+            });
+          },
+          child: Container(
+            padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? AppColors.primaryColor.withOpacity(0.1)
+                  : Colors.grey[200],
+              borderRadius: BorderRadius.circular(16.r),
+            ),
+            child: Text(
+              benefit,
+              style: TextStyle(
+                fontSize: 13.sp,
+                color: isSelected ? AppColors.primaryColor : Colors.black,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: -6.h,
+          right: -6.w,
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                benefits.remove(benefit);
+                selectedBenefits.remove(benefit);
+              });
+            },
+            child: Container(
+              width: 16.w,
+              height: 16.h,
+              decoration: BoxDecoration(
+                color: Colors.black,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.close,
+                size: 12.sp,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAddChip(String label, {VoidCallback? onTap}) {
+    final chip = Container(
       padding: EdgeInsets.symmetric(horizontal: 14.w, vertical: 8.h),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -976,6 +1659,15 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
           fontWeight: FontWeight.w500,
         ),
       ),
+    );
+
+    if (onTap == null) {
+      return chip;
+    }
+
+    return GestureDetector(
+      onTap: onTap,
+      child: chip,
     );
   }
 
