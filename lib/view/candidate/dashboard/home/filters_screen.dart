@@ -14,19 +14,19 @@ class FiltersScreen extends StatefulWidget {
 
 class _FiltersScreenState extends State<FiltersScreen> {
   // Job type
-  String _selectedJobType = 'Full-time';
+  String _selectedJobType = '';
 
   // Work mode
-  String _selectedWorkMode = 'On-site';
+  String _selectedWorkMode = '';
 
   // Experience level
-  String _selectedExperienceLevel = 'Mid-level';
+  String _selectedExperienceLevel = '';
 
   // Compensation
-  RangeValues _compensationRange = RangeValues(30, 55);
+  RangeValues _compensationRange = RangeValues(0, 100);
 
   // Shift
-  String _selectedShift = 'Night';
+  String _selectedShift = '';
 
   // Location
   final TextEditingController _locationController = TextEditingController();
@@ -135,7 +135,7 @@ class _FiltersScreenState extends State<FiltersScreen> {
                               _selectedJobType = '';
                               _selectedWorkMode = '';
                               _selectedExperienceLevel = '';
-                              _compensationRange = RangeValues(30, 55);
+                              _compensationRange = RangeValues(0, 100);
                               _selectedShift = '';
                               _locationController.clear();
                             });
@@ -336,7 +336,9 @@ class _FiltersScreenState extends State<FiltersScreen> {
                                 ),
                                 SizedBox(height: 4.h),
                                 Text(
-                                  '\$${_compensationRange.start.round()}/hr – \$${_compensationRange.end.round()}/hr',
+                                  _compensationRange.start == 0 && _compensationRange.end == 100
+                                      ? 'Any compensation'
+                                      : '\$${_compensationRange.start.round()}/hr – \$${_compensationRange.end.round()}/hr',
                                   style: TextStyle(
                                     fontSize: 16.sp,
                                     fontWeight: FontWeight.bold,
@@ -486,7 +488,33 @@ class _FiltersScreenState extends State<FiltersScreen> {
                           SizedBox(height: 24.h),
                           // Apply filters button
                           GestureDetector(
-                            onTap: () => Get.back(),
+                            onTap: () {
+                              // Return filter data
+                              final filterData = <String, dynamic>{};
+                              
+                              if (_selectedJobType.isNotEmpty) {
+                                filterData['workType'] = _selectedJobType;
+                              }
+                              if (_selectedWorkMode.isNotEmpty) {
+                                filterData['locationType'] = _selectedWorkMode;
+                              }
+                              if (_selectedExperienceLevel.isNotEmpty) {
+                                filterData['seniority'] = _selectedExperienceLevel;
+                              }
+                              // Only include compensation if not at default range
+                              if (_compensationRange.start > 0 || _compensationRange.end < 100) {
+                                filterData['minPay'] = _compensationRange.start.round();
+                                filterData['maxPay'] = _compensationRange.end.round();
+                              }
+                              if (_selectedShift.isNotEmpty) {
+                                filterData['shift'] = _selectedShift;
+                              }
+                              if (_locationController.text.trim().isNotEmpty) {
+                                filterData['location'] = _locationController.text.trim();
+                              }
+                              
+                              Get.back(result: filterData);
+                            },
                             child: Container(
                               width: double.infinity,
                               padding: EdgeInsets.symmetric(vertical: 14.h),

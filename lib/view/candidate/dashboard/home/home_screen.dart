@@ -19,6 +19,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final Dio _dio = Dio();
+  final TextEditingController _searchController = TextEditingController();
   List<Map<String, dynamic>> _jobs = [];
   bool _isLoading = true;
   String? _errorMessage;
@@ -31,6 +32,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     _dio.close();
     super.dispose();
   }
@@ -54,7 +56,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return null;
   }
 
-  Future<void> _fetchJobs() async {
+  Future<void> _fetchJobs({String? searchQuery}) async {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
@@ -70,10 +72,17 @@ class _HomeScreenState extends State<HomeScreen> {
         return;
       }
 
+      // Build payload with search query if provided
+      final payload = <String, dynamic>{};
+      final searchText = searchQuery ?? _searchController.text.trim();
+      if (searchText.isNotEmpty) {
+        payload['search'] = searchText;
+      }
+
       var headers = {
         'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
       };
-      var data = '';
       
       var response = await _dio.request(
         ApiConfig.getUrl(ApiConfig.fetchJob),
@@ -81,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
           method: 'POST',
           headers: headers,
         ),
-        data: data,
+        data: jsonEncode(payload),
       );
 
       if (response.statusCode == 200) {
@@ -249,6 +258,14 @@ class _HomeScreenState extends State<HomeScreen> {
                                   SizedBox(width: 10.w),
                                   Expanded(
                                     child: TextField(
+                                      controller: _searchController,
+                                      onChanged: (value) {
+                                        setState(() {}); // Update UI to show/hide clear button
+                                      },
+                                      onSubmitted: (value) {
+                                        // Trigger search when user presses enter
+                                        _fetchJobs();
+                                      },
                                       decoration: InputDecoration(
                                         hintText: 'Search roles, companies...',
                                         hintStyle: TextStyle(
@@ -259,6 +276,23 @@ class _HomeScreenState extends State<HomeScreen> {
                                       ),
                                     ),
                                   ),
+                                  if (_searchController.text.isNotEmpty)
+                                    GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _searchController.clear();
+                                        });
+                                        _fetchJobs();
+                                      },
+                                      child: Padding(
+                                        padding: EdgeInsets.only(left: 8.w),
+                                        child: Icon(
+                                          Icons.clear,
+                                          color: Colors.grey[400],
+                                          size: 20.sp,
+                                        ),
+                                      ),
+                                    ),
                                 ],
                               ),
                             ),
@@ -569,18 +603,32 @@ class _HomeScreenState extends State<HomeScreen> {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Company logo placeholder
+                // Company logo
                 Container(
                   width: 37.w,
                   height: 42.h,
                   decoration: BoxDecoration(
                     color: Color(0xFFE8E9F3),
                     borderRadius: BorderRadius.circular(10.r),
-                    image: DecorationImage(
-                      image: AssetImage('assets/images/avatar2.png'),
-                      fit: BoxFit.fill,
-                    ),
                   ),
+                  child: jobData != null && jobData['logoPath'] != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(10.r),
+                          child: Image.network(
+                            ApiConfig.getImageUrl(jobData['logoPath'].toString()),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Image.asset(
+                                'assets/images/avatar2.png',
+                                fit: BoxFit.fill,
+                              );
+                            },
+                          ),
+                        )
+                      : Image.asset(
+                          'assets/images/avatar2.png',
+                          fit: BoxFit.fill,
+                        ),
                 ),
                 SizedBox(width: 10.w),
                 Expanded(

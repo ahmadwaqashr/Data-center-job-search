@@ -4,6 +4,7 @@ import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import 'quick_apply_screen.dart';
 
 class JobDetailScreen extends StatelessWidget {
@@ -148,13 +149,30 @@ class JobDetailScreen extends StatelessWidget {
                                           12.r,
                                         ),
                                       ),
-                                      child: Center(
-                                        child: Icon(
-                                          Icons.business,
-                                          size: 28.sp,
-                                          color: AppColors.primaryColor,
-                                        ),
-                                      ),
+                                      child: jobData['logoPath'] != null
+                                          ? ClipRRect(
+                                              borderRadius: BorderRadius.circular(12.r),
+                                              child: Image.network(
+                                                ApiConfig.getImageUrl(jobData['logoPath'].toString()),
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (context, error, stackTrace) {
+                                                  return Center(
+                                                    child: Icon(
+                                                      Icons.business,
+                                                      size: 28.sp,
+                                                      color: AppColors.primaryColor,
+                                                    ),
+                                                  );
+                                                },
+                                              ),
+                                            )
+                                          : Center(
+                                              child: Icon(
+                                                Icons.business,
+                                                size: 28.sp,
+                                                color: AppColors.primaryColor,
+                                              ),
+                                            ),
                                     ),
                                     SizedBox(width: 12.w),
                                     Expanded(

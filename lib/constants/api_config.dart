@@ -1,6 +1,6 @@
 class ApiConfig {
   // Base URL for API endpoints
-  static const String baseUrl = 'http://172.20.10.3:5000';
+  static const String baseUrl = 'http://192.168.100.20:5000';
 
   // API Endpoints
   static const String fetchCoreExpertise = '/api/coreexpertise/fetch_coreExpertise';
