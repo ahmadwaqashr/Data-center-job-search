@@ -106,7 +106,7 @@ class JobDetailScreen extends StatelessWidget {
                                 ),
                               ),
                               Text(
-                                jobData['title'] ?? 'Data Center Technician',
+                                jobData['jobTitle'] ?? jobData['title'] ?? 'Data Center Technician',
                                 style: TextStyle(
                                   fontSize: 18.sp,
                                   fontWeight: FontWeight.bold,
@@ -163,8 +163,7 @@ class JobDetailScreen extends StatelessWidget {
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            jobData['title'] ??
-                                                'Data Center Technician',
+                                            jobData['jobTitle'] ?? jobData['title'] ?? 'Data Center Technician',
                                             style: TextStyle(
                                               fontSize: 16.sp,
                                               fontWeight: FontWeight.bold,
@@ -173,7 +172,7 @@ class JobDetailScreen extends StatelessWidget {
                                           ),
                                           SizedBox(height: 4.h),
                                           Text(
-                                            '${jobData['company'] ?? 'EdgeCore Systems'} • ${jobData['location'] ?? 'Seattle, WA'}',
+                                            '${jobData['companyName'] ?? jobData['company'] ?? 'EdgeCore Systems'} • ${jobData['location'] ?? 'Seattle, WA'}',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               color: Colors.grey[600],
@@ -183,7 +182,7 @@ class JobDetailScreen extends StatelessWidget {
                                       ),
                                     ),
                                     Text(
-                                      jobData['postedTime'] ?? 'Posted 2h ago',
+                                      _formatTimeAgo(jobData['createdAt']?.toString()) ?? jobData['postedTime'] ?? 'Posted 2h ago',
                                       style: TextStyle(
                                         fontSize: 11.sp,
                                         color: Colors.grey[500],
@@ -197,14 +196,23 @@ class JobDetailScreen extends StatelessWidget {
                                   runSpacing: 8.h,
                                   children: [
                                     _buildInfoChip(
-                                      jobData['type'] ?? 'Full-time',
+                                      jobData['workType'] ?? jobData['type'] ?? 'Full-time',
                                     ),
+                                    if (jobData['shifts'] != null && (jobData['shifts'] as List).isNotEmpty)
+                                      _buildInfoChip(
+                                        (jobData['shifts'] as List)[0].toString(),
+                                      )
+                                    else if (jobData['schedule'] != null)
+                                      _buildInfoChip(
+                                        jobData['schedule'].toString(),
+                                      ),
                                     _buildInfoChip(
-                                      jobData['schedule'] ?? 'Shift-based',
+                                      jobData['locationType'] ?? jobData['workStyle'] ?? 'On-site',
                                     ),
-                                    _buildInfoChip(
-                                      jobData['workStyle'] ?? 'On-site',
-                                    ),
+                                    if (jobData['seniority'] != null)
+                                      _buildInfoChip(
+                                        jobData['seniority'].toString(),
+                                      ),
                                   ],
                                 ),
                                 SizedBox(height: 16.h),
@@ -217,8 +225,7 @@ class JobDetailScreen extends StatelessWidget {
                                           CrossAxisAlignment.start,
                                       children: [
                                         Text(
-                                          jobData['hourlyRate'] ??
-                                              '\$38 – 45/hr',
+                                          _formatSalary(jobData) ?? jobData['hourlyRate'] ?? '\$38 – 45/hr',
                                           style: TextStyle(
                                             fontSize: 20.sp,
                                             fontWeight: FontWeight.bold,
@@ -278,24 +285,24 @@ class JobDetailScreen extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(height: 12.h),
-                                Text(
-                                  'Join EdgeCore Systems and help operate a high-availability data center environment, supporting mission-critical infrastructure for global customers.',
-                                  style: TextStyle(
-                                    fontSize: 13.sp,
-                                    color: Colors.grey[700],
-                                    height: 1.5,
+                                if (jobData['jobDescription'] != null && jobData['jobDescription'].toString().isNotEmpty)
+                                  Text(
+                                    jobData['jobDescription'].toString(),
+                                    style: TextStyle(
+                                      fontSize: 13.sp,
+                                      color: Colors.grey[700],
+                                      height: 1.5,
+                                    ),
+                                  )
+                                else
+                                  Text(
+                                    'Join ${jobData['companyName'] ?? jobData['company'] ?? 'EdgeCore Systems'} and help operate a high-availability data center environment, supporting mission-critical infrastructure for global customers.',
+                                    style: TextStyle(
+                                      fontSize: 13.sp,
+                                      color: Colors.grey[700],
+                                      height: 1.5,
+                                    ),
                                   ),
-                                ),
-                                SizedBox(height: 12.h),
-                                _buildBulletPoint(
-                                  'Monitor racks, power, and cooling to ensure uptime and respond quickly to incidents.',
-                                ),
-                                _buildBulletPoint(
-                                  'Perform server installs, swaps, and cable management following strict standards.',
-                                ),
-                                _buildBulletPoint(
-                                  'Collaborate closely with network and SRE teams during maintenance windows.',
-                                ),
                               ],
                             ),
                           ),
@@ -319,18 +326,25 @@ class JobDetailScreen extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(height: 12.h),
-                                _buildBulletPoint(
-                                  '2+ years in data center operations, IT support, or related field.',
-                                ),
-                                _buildBulletPoint(
-                                  'Hands-on experience with server hardware, cabling, and basic networking.',
-                                ),
-                                _buildBulletPoint(
-                                  'Comfortable working shift-based schedules, including nights or weekends.',
-                                ),
-                                _buildBulletPoint(
-                                  'Ability to lift and move equipment up to 50 lbs safely.',
-                                ),
+                                if (jobData['requirements'] != null && jobData['requirements'].toString().isNotEmpty)
+                                  _buildBulletPoint(
+                                    jobData['requirements'].toString(),
+                                  )
+                                else
+                                  ...[
+                                    _buildBulletPoint(
+                                      '2+ years in data center operations, IT support, or related field.',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Hands-on experience with server hardware, cabling, and basic networking.',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Comfortable working shift-based schedules, including nights or weekends.',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Ability to lift and move equipment up to 50 lbs safely.',
+                                    ),
+                                  ],
                               ],
                             ),
                           ),
@@ -354,15 +368,26 @@ class JobDetailScreen extends StatelessWidget {
                                   ),
                                 ),
                                 SizedBox(height: 12.h),
-                                _buildBulletPoint(
-                                  'Competitive hourly pay with overtime eligibility.',
-                                ),
-                                _buildBulletPoint(
-                                  'Health, dental, and vision coverage from day one.',
-                                ),
-                                _buildBulletPoint(
-                                  'Training budget and certification support for data center and cloud skills.',
-                                ),
+                                if (jobData['banefit'] != null && (jobData['banefit'] as List).isNotEmpty)
+                                  ...(jobData['banefit'] as List).map((benefit) => 
+                                    _buildBulletPoint(benefit.toString())
+                                  ).toList()
+                                else if (jobData['benefits'] != null && (jobData['benefits'] as List).isNotEmpty)
+                                  ...(jobData['benefits'] as List).map((benefit) => 
+                                    _buildBulletPoint(benefit.toString())
+                                  ).toList()
+                                else
+                                  ...[
+                                    _buildBulletPoint(
+                                      'Competitive hourly pay with overtime eligibility.',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Health, dental, and vision coverage from day one.',
+                                    ),
+                                    _buildBulletPoint(
+                                      'Training budget and certification support for data center and cloud skills.',
+                                    ),
+                                  ],
                               ],
                             ),
                           ),
@@ -440,7 +465,9 @@ class JobDetailScreen extends StatelessWidget {
                                           ),
                                           SizedBox(height: 4.h),
                                           Text(
-                                            'Shift-based',
+                                            jobData['shifts'] != null && (jobData['shifts'] as List).isNotEmpty
+                                                ? (jobData['shifts'] as List)[0].toString()
+                                                : jobData['schedule']?.toString() ?? 'Shift-based',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               fontWeight: FontWeight.w500,
@@ -473,7 +500,7 @@ class JobDetailScreen extends StatelessWidget {
                                           ),
                                           SizedBox(height: 4.h),
                                           Text(
-                                            'Mid-level',
+                                            jobData['seniority']?.toString() ?? 'Mid-level',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               fontWeight: FontWeight.w500,
@@ -513,7 +540,7 @@ class JobDetailScreen extends StatelessWidget {
                                           ),
                                           SizedBox(height: 4.h),
                                           Text(
-                                            'Full-time',
+                                            jobData['workType'] ?? jobData['type'] ?? 'Full-time',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               fontWeight: FontWeight.w500,
@@ -546,7 +573,11 @@ class JobDetailScreen extends StatelessWidget {
                                           ),
                                           SizedBox(height: 4.h),
                                           Text(
-                                            'On-site only',
+                                            jobData['locationType'] == 'On-site'
+                                                ? 'On-site only'
+                                                : jobData['locationType'] == 'Remote'
+                                                    ? 'Remote only'
+                                                    : jobData['locationType']?.toString() ?? 'On-site only',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               fontWeight: FontWeight.w500,
@@ -623,5 +654,45 @@ class JobDetailScreen extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  String? _formatSalary(Map<String, dynamic> jobData) {
+    final minPay = jobData['minPay']?.toDouble();
+    final maxPay = jobData['maxPay']?.toDouble();
+    final salaryType = jobData['salaryType']?.toString().toLowerCase() ?? 'monthly';
+    
+    if (minPay == null || maxPay == null) return null;
+    
+    if (salaryType == 'hr' || salaryType == 'hourly') {
+      final minPayStr = minPay.toStringAsFixed(0);
+      final maxPayStr = maxPay.toStringAsFixed(0);
+      return '\$${minPayStr}-\$${maxPayStr}/hr';
+    } else {
+      final minK = (minPay / 1000).toStringAsFixed(0);
+      final maxK = (maxPay / 1000).toStringAsFixed(0);
+      return '\$${minK}k-\$${maxK}k';
+    }
+  }
+
+  String? _formatTimeAgo(String? createdAt) {
+    if (createdAt == null || createdAt.isEmpty) return null;
+    // Simple time formatting - you can enhance this with a proper date package
+    try {
+      final date = DateTime.parse(createdAt);
+      final now = DateTime.now();
+      final difference = now.difference(date);
+      
+      if (difference.inDays > 0) {
+        return 'Posted ${difference.inDays} ${difference.inDays == 1 ? 'day' : 'days'} ago';
+      } else if (difference.inHours > 0) {
+        return 'Posted ${difference.inHours} ${difference.inHours == 1 ? 'hour' : 'hours'} ago';
+      } else if (difference.inMinutes > 0) {
+        return 'Posted ${difference.inMinutes} ${difference.inMinutes == 1 ? 'minute' : 'minutes'} ago';
+      } else {
+        return 'Posted recently';
+      }
+    } catch (e) {
+      return 'Posted recently';
+    }
   }
 }

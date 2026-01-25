@@ -1,8 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import 'jobs_matching_filters_screen.dart';
 import 'job_detail_screen.dart';
 
@@ -14,6 +18,122 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
+  final Dio _dio = Dio();
+  List<Map<String, dynamic>> _jobs = [];
+  bool _isLoading = true;
+  String? _errorMessage;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchJobs();
+  }
+
+  @override
+  void dispose() {
+    _dio.close();
+    super.dispose();
+  }
+
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    if (authToken != null && authToken.isNotEmpty) {
+      return authToken;
+    }
+
+    final userDataString = prefs.getString('user_data');
+    if (userDataString != null) {
+      final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      final token = userData['token']?.toString();
+      if (token != null && token.isNotEmpty) {
+        return token;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _fetchJobs() async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        setState(() {
+          _errorMessage = 'No authentication token found. Please login again.';
+          _isLoading = false;
+        });
+        return;
+      }
+
+      var headers = {
+        'Authorization': 'Bearer $token',
+      };
+      var data = '';
+      
+      var response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchJob),
+        options: Options(
+          method: 'POST',
+          headers: headers,
+        ),
+        data: data,
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        if (responseData['success'] == true && responseData['data'] != null) {
+          setState(() {
+            _jobs = List<Map<String, dynamic>>.from(responseData['data']);
+            _isLoading = false;
+          });
+        } else {
+          setState(() {
+            _errorMessage = responseData['message'] ?? 'Failed to load jobs';
+            _isLoading = false;
+          });
+        }
+      } else {
+        setState(() {
+          _errorMessage = response.statusMessage ?? 'Failed to load jobs';
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        _errorMessage = 'Error loading jobs: ${e.toString()}';
+        _isLoading = false;
+      });
+      print('Error fetching jobs: $e');
+    }
+  }
+
+  String _formatSalary(Map<String, dynamic> job) {
+    final minPay = job['minPay']?.toDouble() ?? 0.0;
+    final maxPay = job['maxPay']?.toDouble() ?? 0.0;
+    final salaryType = job['salaryType']?.toString().toLowerCase() ?? 'monthly';
+    
+    if (salaryType == 'hr' || salaryType == 'hourly') {
+      final minPayStr = minPay.toStringAsFixed(0);
+      final maxPayStr = maxPay.toStringAsFixed(0);
+      return '\$${minPayStr}-\$${maxPayStr}/hr';
+    } else {
+      final minK = (minPay / 1000).toStringAsFixed(0);
+      final maxK = (maxPay / 1000).toStringAsFixed(0);
+      return '\$${minK}k-\$${maxK}k';
+    }
+  }
+
+  String _formatTimeAgo(String? createdAt) {
+    if (createdAt == null) return 'Posted recently';
+    // Simple time formatting - you can enhance this with a proper date package
+    return 'Posted recently';
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -314,35 +434,76 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                       SizedBox(height: 16.h),
                       // Job cards
-                      _buildJobCard(
-                        title: 'Data Center Technician',
-                        company: 'EdgeCore Systems • Full-time',
-                        tags: ['Shift-based', 'On-site'],
-                        location: 'Seattle, WA • Posted 2h ago',
-                        salary: '\$38-45/hr',
-                        badge: 'High match',
-                        badgeColor: Color(0xFF7C3AED),
-                      ),
-                      SizedBox(height: 12.h),
-                      _buildJobCard(
-                        title: 'Data Operations Engineer',
-                        company: 'Nimbus Cloud • Hybrid',
-                        tags: ['Mid-level', 'Night shift'],
-                        location: 'Austin, TX • Posted 1d ago',
-                        salary: '\$95k-115k',
-                        badge: 'New',
-                        badgeColor: Color(0xFF10B981),
-                      ),
-                      SizedBox(height: 12.h),
-                      _buildJobCard(
-                        title: 'Facilities Specialist',
-                        company: 'CoreStack Data Centers',
-                        tags: ['Full-time', 'Day shift'],
-                        location: 'Remote from US • Posted 3d ago',
-                        salary: '\$70k-82k',
-                        badge: 'Remote eligible',
-                        badgeColor: Color(0xFF3B82F6),
-                      ),
+                      if (_isLoading)
+                        Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(40.h),
+                            child: CircularProgressIndicator(
+                              color: AppColors.primaryColor,
+                            ),
+                          ),
+                        )
+                      else if (_errorMessage != null)
+                        Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(40.h),
+                            child: Column(
+                              children: [
+                                Text(
+                                  _errorMessage!,
+                                  style: TextStyle(
+                                    fontSize: 14.sp,
+                                    color: Colors.red,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                                SizedBox(height: 16.h),
+                                ElevatedButton(
+                                  onPressed: _fetchJobs,
+                                  child: Text('Retry'),
+                                ),
+                              ],
+                            ),
+                          ),
+                        )
+                      else if (_jobs.isEmpty)
+                        Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(40.h),
+                            child: Text(
+                              'No jobs available',
+                              style: TextStyle(
+                                fontSize: 14.sp,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        ..._jobs.map((job) {
+                          final shifts = (job['shifts'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? [];
+                          final tags = [
+                            job['workType']?.toString() ?? 'Full-time',
+                            if (job['seniority'] != null) job['seniority'].toString(),
+                            if (shifts.isNotEmpty) shifts[0],
+                          ].where((e) => e != null && e.isNotEmpty).toList();
+                          
+                          return Column(
+                            children: [
+                              _buildJobCard(
+                                title: job['jobTitle']?.toString() ?? 'Job Title',
+                                company: '${job['companyName']?.toString() ?? 'Company'} • ${job['workType']?.toString() ?? 'Full-time'}',
+                                tags: tags,
+                                location: '${job['location']?.toString() ?? 'Location'} • ${_formatTimeAgo(job['createdAt']?.toString())}',
+                                salary: _formatSalary(job),
+                                badge: 'New',
+                                badgeColor: Color(0xFF10B981),
+                                jobData: job,
+                              ),
+                              SizedBox(height: 12.h),
+                            ],
+                          );
+                        }).toList(),
                       SizedBox(height: 30.h),
                     ],
                   ),
@@ -363,33 +524,39 @@ class _HomeScreenState extends State<HomeScreen> {
     required String salary,
     required String badge,
     required Color badgeColor,
+    Map<String, dynamic>? jobData,
   }) {
     return GestureDetector(
       onTap:
-          () => Get.to(
-            () => JobDetailScreen(
-              jobData: {
-                'title': title,
-                'company': company.split(' • ')[0],
-                'type':
-                    company.contains('Full-time')
-                        ? 'Full-time'
-                        : company.contains('Hybrid')
-                        ? 'Hybrid'
-                        : 'Full-time',
-                'schedule': tags.isNotEmpty ? tags[0] : 'Shift-based',
-                'workStyle': tags.length > 1 ? tags[1] : 'On-site',
-                'location': location.split(' • ')[0],
-                'postedTime':
-                    location.contains('Posted')
-                        ? location.split(' • ')[1]
-                        : 'Posted recently',
-                'hourlyRate': salary,
-                'matchLevel': badge,
-                'matchColor': badgeColor,
-              },
-            ),
-          ),
+          () {
+            // If jobData is provided (from API), use it directly
+            // Otherwise, construct from individual parameters
+            final dataToPass = jobData ?? {
+              'jobTitle': title,
+              'companyName': company.split(' • ')[0],
+              'workType':
+                  company.contains('Full-time')
+                      ? 'Full-time'
+                      : company.contains('Hybrid')
+                      ? 'Hybrid'
+                      : 'Full-time',
+              'shifts': tags.isNotEmpty ? [tags[0]] : ['Shift-based'],
+              'locationType': tags.length > 1 ? tags[1] : 'On-site',
+              'location': location.split(' • ')[0],
+              'createdAt': location.contains('Posted')
+                  ? location.split(' • ')[1]
+                  : 'Posted recently',
+              'minPay': 0,
+              'maxPay': 0,
+              'salaryType': salary.contains('hr') ? 'hr' : 'monthly',
+            };
+            
+            Get.to(
+              () => JobDetailScreen(
+                jobData: dataToPass,
+              ),
+            );
+          },
       child: Container(
         padding: EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -400,7 +567,7 @@ class _HomeScreenState extends State<HomeScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Company logo placeholder
                 Container(
@@ -415,10 +582,11 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
-                SizedBox(width: 10..w),
+                SizedBox(width: 10.w),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Text(
                         title,
@@ -427,17 +595,23 @@ class _HomeScreenState extends State<HomeScreen> {
                           fontWeight: FontWeight.bold,
                           color: Colors.black,
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
+                      SizedBox(height: 2.h),
                       Text(
                         company,
                         style: TextStyle(
                           fontSize: 13.sp,
                           color: Colors.grey[600],
                         ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
                 ),
+                SizedBox(width: 8.w),
                 Container(
                   padding: EdgeInsets.symmetric(
                     horizontal: 10.w,
@@ -454,6 +628,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       color: Colors.black,
                       fontWeight: FontWeight.w600,
                     ),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ),
               ],
@@ -461,33 +637,42 @@ class _HomeScreenState extends State<HomeScreen> {
             SizedBox(height: 10.h),
             Row(
               children: [
-                ...tags.map(
-                  (tag) => Container(
-                    margin: EdgeInsets.only(right: 8.w),
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 10.w,
-                      vertical: 5.h,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[200],
-                      borderRadius: BorderRadius.circular(6.r),
-                    ),
-                    child: Text(
-                      tag,
-                      style: TextStyle(
-                        fontSize: 12.sp,
-                        color: Colors.grey[700],
+                Flexible(
+                  child: Wrap(
+                    spacing: 8.w,
+                    runSpacing: 8.h,
+                    children: tags.map(
+                      (tag) => Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 10.w,
+                          vertical: 5.h,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(6.r),
+                        ),
+                        child: Text(
+                          tag,
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            color: Colors.grey[700],
+                          ),
+                        ),
                       ),
-                    ),
+                    ).toList(),
                   ),
                 ),
-                Spacer(),
-                Text(
-                  salary,
-                  style: TextStyle(
-                    fontSize: 18.sp,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.black,
+                SizedBox(width: 8.w),
+                Flexible(
+                  child: Text(
+                    salary,
+                    style: TextStyle(
+                      fontSize: 18.sp,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.black,
+                    ),
+                    textAlign: TextAlign.end,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -496,38 +681,44 @@ class _HomeScreenState extends State<HomeScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Expanded(
+                Flexible(
                   child: Text(
                     location,
                     style: TextStyle(fontSize: 13.sp, color: Colors.grey[600]),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                   ),
                 ),
                 SizedBox(width: 8.w),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: 20.w,
-                    vertical: 10.h,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.primaryColor,
-                    borderRadius: BorderRadius.circular(25.r),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(.25),
-                        blurRadius: 20,
+                Flexible(
+                  child: Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 20.w,
+                      vertical: 10.h,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.primaryColor,
+                      borderRadius: BorderRadius.circular(25.r),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(.25),
+                          blurRadius: 20,
+                        ),
+                      ],
+                    ),
+                    child: Text(
+                      salary.contains('hr')
+                          ? 'Quick apply'
+                          : salary.contains('82k')
+                          ? 'Save & apply'
+                          : 'Apply now',
+                      style: TextStyle(
+                        fontSize: 13.sp,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
                       ),
-                    ],
-                  ),
-                  child: Text(
-                    salary.contains('hr')
-                        ? 'Quick apply'
-                        : salary.contains('82k')
-                        ? 'Save & apply'
-                        : 'Apply now',
-                    style: TextStyle(
-                      fontSize: 13.sp,
-                      color: Colors.white,
-                      fontWeight: FontWeight.w600,
+                      textAlign: TextAlign.center,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 ),

@@ -46,6 +46,9 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
   String _benefitSearchQuery = '';
   List<String> selectedBenefits = [];
 
+  List<String> seniorityOptions = ['Expert', 'Mid-level', 'Entry-level', 'Senior', 'Junior'];
+  String? selectedSeniority;
+
   @override
   void dispose() {
     _jobTitleController.dispose();
@@ -249,6 +252,16 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
       Get.snackbar(
         'Error',
         'Please select a shift',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return false;
+    }
+    if (selectedSeniority == null || selectedSeniority!.trim().isEmpty) {
+      Get.snackbar(
+        'Error',
+        'Please select a seniority level',
         backgroundColor: Colors.red,
         colorText: Colors.white,
         snackPosition: SnackPosition.BOTTOM,
@@ -765,6 +778,60 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                                         ),
                                       ),
                                     ),
+                                  ],
+                                ),
+                                SizedBox(height: 20.h),
+                                // Seniority
+                                Text(
+                                  'Seniority',
+                                  style: TextStyle(
+                                    fontSize: 14.sp,
+                                    color: Colors.black,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                SizedBox(height: 12.h),
+                                Wrap(
+                                  spacing: 8.w,
+                                  runSpacing: 8.h,
+                                  children: [
+                                    ...seniorityOptions.map((seniority) {
+                                      final isSelected = selectedSeniority == seniority;
+                                      return GestureDetector(
+                                        onTap: () {
+                                          setState(() {
+                                            selectedSeniority = isSelected ? null : seniority;
+                                          });
+                                        },
+                                        child: Container(
+                                          padding: EdgeInsets.symmetric(
+                                            horizontal: 14.w,
+                                            vertical: 8.h,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: isSelected
+                                                ? AppColors.primaryColor.withOpacity(0.1)
+                                                : Colors.grey[200],
+                                            borderRadius: BorderRadius.circular(16.r),
+                                            border: Border.all(
+                                              color: isSelected
+                                                  ? AppColors.primaryColor
+                                                  : Colors.transparent,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            seniority,
+                                            style: TextStyle(
+                                              fontSize: 13.sp,
+                                              color: isSelected
+                                                  ? AppColors.primaryColor
+                                                  : Colors.black,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                      );
+                                    }),
                                   ],
                                 ),
                                 SizedBox(height: 20.h),
@@ -1358,6 +1425,7 @@ class _NewJobPostScreenState extends State<NewJobPostScreen> {
                                           workType: selectedWorkType,
                                           locationType: selectedLocationType,
                                           salaryType: selectedSalaryType.toLowerCase(),
+                                          seniority: selectedSeniority!,
                                           jobDescription:
                                               _jobDescriptionController.text,
                                           requirements:

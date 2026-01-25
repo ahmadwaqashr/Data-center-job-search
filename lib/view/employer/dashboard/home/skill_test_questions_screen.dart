@@ -19,6 +19,7 @@ class SkillTestQuestionsScreen extends StatefulWidget {
   final String workType;
   final String locationType;
   final String salaryType;
+  final String seniority;
   final String jobDescription;
   final String requirements;
   final List<String> skills;
@@ -36,6 +37,7 @@ class SkillTestQuestionsScreen extends StatefulWidget {
     required this.workType,
     required this.locationType,
     required this.salaryType,
+    required this.seniority,
     required this.jobDescription,
     required this.requirements,
     required this.skills,
@@ -169,6 +171,7 @@ class _SkillTestQuestionsScreenState extends State<SkillTestQuestionsScreen> {
         'location': widget.location.trim(),
         'workType': widget.workType,
         'locationType': widget.locationType,
+        'seniority': widget.seniority,
         'salarytype': widget.salaryType,
         'minPay': minPay,
         'maxPay': maxPay,
