@@ -1,5 +1,6 @@
 import 'package:data_center_job/utils/custom_button.dart';
 import 'package:data_center_job/view/employer/auth/employer_email_verification_screen.dart';
+import 'package:data_center_job/view/candidate/auth/phone_auth_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
@@ -369,56 +370,61 @@ class _EmployerSignInScreenState extends State<EmployerSignInScreen> {
                                 ),
                                 SizedBox(height: 16.h),
                                 // Prefer phone sign-in
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Text(
-                                      'Prefer phone sign-in?',
-                                      style: TextStyle(
-                                        fontSize: 13.sp,
-                                        color: Colors.grey[600],
-                                      ),
-                                    ),
-                                    SizedBox(width: 8.w),
-                                    GestureDetector(
-                                      onTap: () {
-                                        // TODO: Navigate to phone sign-in
-                                      },
-                                      child: Text(
-                                        'Use phone number',
-                                        style: TextStyle(
-                                          fontSize: 13.sp,
-                                          color: AppColors.primaryColor,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                // Row(
+                                //   mainAxisAlignment: MainAxisAlignment.center,
+                                //   children: [
+                                //     Text(
+                                //       'Prefer phone sign-in?',
+                                //       style: TextStyle(
+                                //         fontSize: 13.sp,
+                                //         color: Colors.grey[600],
+                                //       ),
+                                //     ),
+                                //     SizedBox(width: 8.w),
+                                //     GestureDetector(
+                                //       onTap: () {
+                                //         // TODO: Navigate to phone sign-in
+                                //       },
+                                //       child: Text(
+                                //         'Use phone number',
+                                //         style: TextStyle(
+                                //           fontSize: 13.sp,
+                                //           color: AppColors.primaryColor,
+                                //           fontWeight: FontWeight.w600,
+                                //         ),
+                                //       ),
+                                //     ),
+                                //   ],
+                                // ),
                               ],
                             ),
                           ),
                           SizedBox(height: 40.h),
                           // Bottom text
                           Center(
-                            child: RichText(
-                              textAlign: TextAlign.center,
-                              text: TextSpan(
-                                style: TextStyle(
-                                  fontSize: 12.sp,
-                                  color: Colors.grey[600],
-                                  height: 1.5,
-                                ),
-                                children: [
-                                  TextSpan(text: 'Looking for a job? '),
-                                  TextSpan(
-                                    text: 'Switch to candidate',
-                                    style: TextStyle(
-                                      color: AppColors.primaryColor,
-                                      fontWeight: FontWeight.w600,
-                                    ),
+                            child: GestureDetector(
+                              onTap: () {
+                                Get.offAll(() => PhoneAuthScreen());
+                              },
+                              child: RichText(
+                                textAlign: TextAlign.center,
+                                text: TextSpan(
+                                  style: TextStyle(
+                                    fontSize: 12.sp,
+                                    color: Colors.grey[600],
+                                    height: 1.5,
                                   ),
-                                ],
+                                  children: [
+                                    TextSpan(text: 'Looking for a job? '),
+                                    TextSpan(
+                                      text: 'Switch to candidate',
+                                      style: TextStyle(
+                                        color: AppColors.primaryColor,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ),

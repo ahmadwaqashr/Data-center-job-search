@@ -1,13 +1,63 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import '../pipeline/pipeline_screen.dart';
 import 'new_job_post_screen.dart';
 
-class EmployerHomeScreen extends StatelessWidget {
+class EmployerHomeScreen extends StatefulWidget {
   const EmployerHomeScreen({super.key});
+
+  @override
+  State<EmployerHomeScreen> createState() => _EmployerHomeScreenState();
+}
+
+class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
+  Map<String, dynamic>? _userData;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserData();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload user data when screen comes into focus for real-time updates
+    if (mounted) {
+      _loadUserData();
+    }
+  }
+
+  Future<void> _loadUserData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userDataString = prefs.getString('user_data');
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+        setState(() {
+          _userData = userData;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading user data: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
 
   @override
   Widget build(BuildContext context) {
@@ -80,12 +130,14 @@ class EmployerHomeScreen extends StatelessWidget {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Good afternoon, Alex',
+                                _userData?['companyName'] ?? 'Company',
                                 style: TextStyle(
-                                  fontSize: 24.sp,
+                                  fontSize: 22.sp,
                                   fontWeight: FontWeight.bold,
                                   color: Colors.black,
                                 ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
                               ),
                               SizedBox(height: 4.h),
                               Text(
@@ -98,18 +150,25 @@ class EmployerHomeScreen extends StatelessWidget {
                               ),
                             ],
                           ),
-                          Container(
-                            width: 48.w,
-                            height: 48.h,
-                            decoration: BoxDecoration(
-                              color: Colors.grey[300],
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              Icons.person,
-                              color: Colors.grey[600],
-                              size: 24.sp,
-                            ),
+                          CircleAvatar(
+                            radius: 24.r,
+                            backgroundImage: _userData?['profilePic'] != null || _userData?['logoPath'] != null
+                                ? NetworkImage(
+                                    ApiConfig.getImageUrl(
+                                      _userData!['logoPath'] ?? _userData!['profilePic'],
+                                    ),
+                                  ) as ImageProvider
+                                : AssetImage('assets/images/avatar1.png') as ImageProvider,
+                            onBackgroundImageError: (exception, stackTrace) {
+                              // Fallback handled by CircleAvatar
+                            },
+                            child: (_userData?['profilePic'] == null && _userData?['logoPath'] == null)
+                                ? Icon(
+                                    Icons.business,
+                                    color: Colors.grey[600],
+                                    size: 24.sp,
+                                  )
+                                : null,
                           ),
                         ],
                       ),

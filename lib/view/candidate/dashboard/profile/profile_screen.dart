@@ -561,14 +561,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                 ),
                                 SizedBox(height: 4.h),
                                 Text(
-                                  _userData?['fullName'] ?? 'Loading...',
+                                  _userRole == 'employer' 
+                                      ? (_userData?['companyName'] ?? 'Loading...')
+                                      : (_userData?['fullName'] ?? 'Loading...'),
                                   style: TextStyle(
-                                    fontSize: 28.sp,
+                                    fontSize: _userRole == 'employer' ? 22.sp : 28.sp,
                                     fontWeight: FontWeight.bold,
                                     color: Colors.black,
                                   ),
                                   overflow: TextOverflow.ellipsis,
-                                  maxLines: 1,
+                                  maxLines: _userRole == 'employer' ? 2 : 1,
                                 ),
                               ],
                             ),

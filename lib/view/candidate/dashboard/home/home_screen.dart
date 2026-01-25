@@ -23,11 +23,22 @@ class _HomeScreenState extends State<HomeScreen> {
   List<Map<String, dynamic>> _jobs = [];
   bool _isLoading = true;
   String? _errorMessage;
+  Map<String, dynamic>? _userData;
 
   @override
   void initState() {
     super.initState();
+    _loadUserData();
     _fetchJobs();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload user data when screen comes into focus for real-time updates
+    if (mounted) {
+      _loadUserData();
+    }
   }
 
   @override
@@ -35,6 +46,21 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchController.dispose();
     _dio.close();
     super.dispose();
+  }
+
+  Future<void> _loadUserData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userDataString = prefs.getString('user_data');
+      if (userDataString != null) {
+        final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+        setState(() {
+          _userData = userData;
+        });
+      }
+    } catch (e) {
+      print('Error loading user data: $e');
+    }
   }
 
   Future<String?> _getAuthToken() async {
@@ -231,9 +257,17 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           CircleAvatar(
                             radius: 20.r,
-                            backgroundImage: AssetImage(
-                              'assets/images/avatar1.png',
-                            ),
+                            backgroundImage: _userData?['profilePic'] != null
+                                ? NetworkImage(
+                                    ApiConfig.getImageUrl(_userData!['profilePic']),
+                                  ) as ImageProvider
+                                : AssetImage('assets/images/avatar1.png') as ImageProvider,
+                            onBackgroundImageError: (exception, stackTrace) {
+                              // Fallback handled by CircleAvatar
+                            },
+                            child: _userData?['profilePic'] == null
+                                ? null
+                                : null,
                           ),
                         ],
                       ),
