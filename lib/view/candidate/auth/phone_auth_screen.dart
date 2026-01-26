@@ -299,30 +299,58 @@ class _PhoneAuthScreenState extends State<PhoneAuthScreen> {
       print('💾 Saving user data to SharedPreferences...');
       final prefs = await SharedPreferences.getInstance();
       
-      // Save all user data as JSON
-      await prefs.setString('user_data', jsonEncode(userData));
-      print('   ✅ user_data saved');
+      // Get existing user data to merge with new data (preserve CV and other fields)
+      String? existingUserDataString = prefs.getString('user_data');
+      Map<String, dynamic> mergedUserData = {};
+      
+      if (existingUserDataString != null) {
+        try {
+          mergedUserData = jsonDecode(existingUserDataString) as Map<String, dynamic>;
+          print('   📋 Merging with existing user data');
+        } catch (e) {
+          print('   ⚠️ Could not parse existing user data: $e');
+        }
+      }
+      
+      // Merge new data with existing (new data takes precedence)
+      mergedUserData.addAll(userData);
+      
+      // Save all user data as JSON (includes all fields: profile, CV, etc.)
+      await prefs.setString('user_data', jsonEncode(mergedUserData));
+      print('   ✅ user_data saved with all fields');
+      print('   📦 Saved fields: ${mergedUserData.keys.toList()}');
       
       // Save individual important fields for easy access
-      if (userData['token'] != null) {
-        await prefs.setString('auth_token', userData['token']);
+      if (mergedUserData['token'] != null) {
+        await prefs.setString('auth_token', mergedUserData['token']);
         print('   ✅ auth_token saved');
       }
-      if (userData['id'] != null) {
-        await prefs.setString('user_id', userData['id'].toString());
-        print('   ✅ user_id saved: ${userData['id']}');
+      if (mergedUserData['id'] != null) {
+        await prefs.setString('user_id', mergedUserData['id'].toString());
+        print('   ✅ user_id saved: ${mergedUserData['id']}');
       }
-      if (userData['email'] != null) {
-        await prefs.setString('user_email', userData['email']);
-        print('   ✅ user_email saved: ${userData['email']}');
+      if (mergedUserData['email'] != null) {
+        await prefs.setString('user_email', mergedUserData['email']);
+        print('   ✅ user_email saved: ${mergedUserData['email']}');
       }
-      if (userData['fullName'] != null) {
-        await prefs.setString('user_name', userData['fullName']);
-        print('   ✅ user_name saved: ${userData['fullName']}');
+      if (mergedUserData['fullName'] != null) {
+        await prefs.setString('user_name', mergedUserData['fullName']);
+        print('   ✅ user_name saved: ${mergedUserData['fullName']}');
       }
-      if (userData['role'] != null) {
-        await prefs.setString('user_role', userData['role']);
-        print('   ✅ user_role saved: ${userData['role']}');
+      if (mergedUserData['role'] != null) {
+        await prefs.setString('user_role', mergedUserData['role']);
+        print('   ✅ user_role saved: ${mergedUserData['role']}');
+      }
+      
+      // Log CV-related fields if present
+      if (mergedUserData['cvFileName'] != null || mergedUserData['resumeFileName'] != null || mergedUserData['cvName'] != null) {
+        print('   📄 CV data found:');
+        if (mergedUserData['cvFileName'] != null) print('      - cvFileName: ${mergedUserData['cvFileName']}');
+        if (mergedUserData['resumeFileName'] != null) print('      - resumeFileName: ${mergedUserData['resumeFileName']}');
+        if (mergedUserData['cvName'] != null) print('      - cvName: ${mergedUserData['cvName']}');
+        if (mergedUserData['cvPath'] != null) print('      - cvPath: ${mergedUserData['cvPath']}');
+        if (mergedUserData['cvUpdatedDate'] != null) print('      - cvUpdatedDate: ${mergedUserData['cvUpdatedDate']}');
+        if (mergedUserData['cvPages'] != null) print('      - cvPages: ${mergedUserData['cvPages']}');
       }
       
       print('✅ All user data saved to SharedPreferences successfully');

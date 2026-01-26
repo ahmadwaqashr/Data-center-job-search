@@ -9,12 +9,16 @@ class MoveToInterviewScreen extends StatefulWidget {
   final String candidateName;
   final String jobTitle;
   final String currentStage;
+  final int? candidateId;
+  final int? applicationId;
 
   const MoveToInterviewScreen({
     super.key,
     required this.candidateName,
     required this.jobTitle,
     required this.currentStage,
+    this.candidateId,
+    this.applicationId,
   });
 
   @override

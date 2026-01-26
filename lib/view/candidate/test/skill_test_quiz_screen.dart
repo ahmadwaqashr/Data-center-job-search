@@ -1,19 +1,31 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../constants/colors.dart';
+import '../../../constants/api_config.dart';
 import 'skill_test_result_screen.dart';
 
 class SkillTestQuizScreen extends StatefulWidget {
   final String jobTitle;
   final String company;
+  final Map<String, dynamic>? jobData;
+  final String? goodFitAnswer;
+  final String? startDate;
+  final bool? shareProfile;
 
   const SkillTestQuizScreen({
     super.key,
-    this.jobTitle = 'Data Center Technician',
-    this.company = 'EdgeCore Systems',
+    required this.jobTitle,
+    required this.company,
+    this.jobData,
+    this.goodFitAnswer,
+    this.startDate,
+    this.shareProfile,
   });
 
   @override
@@ -25,8 +37,16 @@ class _SkillTestQuizScreenState extends State<SkillTestQuizScreen> {
   Map<int, int> selectedAnswers = {}; // questionIndex: optionIndex
   Timer? _timer;
   int remainingSeconds = 600; // 10 minutes = 600 seconds
+  final Dio _dio = Dio();
 
-  final List<Map<String, dynamic>> questions = [
+  List<Map<String, dynamic>> questions = [];
+  bool _isLoadingQuestions = true;
+  String? _errorMessage;
+  int? _passingScore;
+  int? _coreExpertiseId;
+  List<int>? _selectedQuestionIds;
+  // Fallback questions if API fails
+  final List<Map<String, dynamic>> _fallbackQuestions = [
     {
       'question':
           'In a data center, which metric best indicates a cooling efficiency?',
@@ -60,82 +80,168 @@ class _SkillTestQuizScreenState extends State<SkillTestQuizScreen> {
       ],
       'correctAnswer': 0,
     },
-    {
-      'question': 'What does DCIM stand for in data center operations?',
-      'options': [
-        'Data Center Infrastructure Management',
-        'Direct Current Integration Module',
-        'Distributed Computing Information Model',
-        'Digital Cable Installation Method',
-      ],
-      'correctAnswer': 0,
-    },
-    {
-      'question':
-          'What is the recommended hot aisle temperature range for most data centers?',
-      'options': [
-        '18-27°C (64-80°F)',
-        '10-15°C (50-59°F)',
-        '30-35°C (86-95°F)',
-        '5-10°C (41-50°F)',
-      ],
-      'correctAnswer': 0,
-    },
-    {
-      'question':
-          'Which cable type is most commonly used for high-speed data center networking?',
-      'options': ['Fiber optic', 'Coaxial', 'USB-C', 'HDMI'],
-      'correctAnswer': 0,
-    },
-    {
-      'question': 'What is the standard rack unit (U) height in data centers?',
-      'options': [
-        '1.75 inches (44.45 mm)',
-        '2.5 inches (63.5 mm)',
-        '1 inch (25.4 mm)',
-        '3 inches (76.2 mm)',
-      ],
-      'correctAnswer': 0,
-    },
-    {
-      'question':
-          'Which protocol is commonly used for remote server management in data centers?',
-      'options': [
-        'IPMI (Intelligent Platform Management Interface)',
-        'FTP (File Transfer Protocol)',
-        'SMTP (Simple Mail Transfer Protocol)',
-        'HTTP (Hypertext Transfer Protocol)',
-      ],
-      'correctAnswer': 0,
-    },
-    {
-      'question':
-          'What is the primary benefit of using hot aisle/cold aisle containment?',
-      'options': [
-        'Improved cooling efficiency',
-        'Increased server speed',
-        'Better network performance',
-        'Reduced cable clutter',
-      ],
-      'correctAnswer': 0,
-    },
-    {
-      'question':
-          'Which tier classification represents the highest level of data center redundancy?',
-      'options': ['Tier IV', 'Tier I', 'Tier II', 'Tier III'],
-      'correctAnswer': 0,
-    },
   ];
 
   @override
   void initState() {
     super.initState();
-    startTimer();
+    _loadJobData();
+    _fetchQuestions();
+  }
+
+  void _loadJobData() {
+    if (widget.jobData != null) {
+      _passingScore = widget.jobData!['passingScore'] as int?;
+      _coreExpertiseId = widget.jobData!['coreExpertiseId'] as int?;
+      if (widget.jobData!['selectedQuestionIds'] != null) {
+        _selectedQuestionIds = List<int>.from(widget.jobData!['selectedQuestionIds']);
+      }
+    }
+  }
+
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    if (authToken != null && authToken.isNotEmpty) {
+      return authToken;
+    }
+
+    final userDataString = prefs.getString('user_data');
+    if (userDataString != null) {
+      final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      final token = userData['token']?.toString();
+      if (token != null && token.isNotEmpty) {
+        return token;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _fetchQuestions() async {
+    if (_coreExpertiseId == null) {
+      // Use fallback questions if no core expertise ID
+      setState(() {
+        questions = _fallbackQuestions;
+        _isLoadingQuestions = false;
+      });
+      startTimer();
+      return;
+    }
+
+    setState(() {
+      _isLoadingQuestions = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final token = await _getAuthToken();
+      var headers = {
+        'Content-Type': 'application/json',
+      };
+      if (token != null) {
+        headers['Authorization'] = 'Bearer $token';
+      }
+
+      var data = jsonEncode({
+        "core_id": _coreExpertiseId,
+      });
+
+      print('📥 Fetching questions for core_id: $_coreExpertiseId');
+
+      var response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchQuestionsByCoreId),
+        options: Options(
+          method: 'POST',
+          headers: headers,
+        ),
+        data: data,
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        print('✅ Questions API Response:');
+        print('   Success: ${responseData['success']}');
+
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final questionsData = List<Map<String, dynamic>>.from(responseData['data']);
+
+          // Filter by selectedQuestionIds if available
+          List<Map<String, dynamic>> filteredQuestions = questionsData;
+          if (_selectedQuestionIds != null && _selectedQuestionIds!.isNotEmpty) {
+            filteredQuestions = questionsData.where((q) {
+              final qId = q['id'] as int?;
+              return qId != null && _selectedQuestionIds!.contains(qId);
+            }).toList();
+          }
+
+          // Convert API response to our question format
+          questions = filteredQuestions.map((q) {
+            List<String> options = [];
+            int correctAnswerIndex = 0;
+
+            if (q['choices'] != null) {
+              final choices = List<Map<String, dynamic>>.from(q['choices']);
+              // Sort by number to maintain order
+              choices.sort((a, b) => (a['number'] ?? 0).compareTo(b['number'] ?? 0));
+              
+              options = choices.map((choice) {
+                return choice['text']?.toString() ?? '';
+              }).toList();
+
+              // Find correct answer index
+              for (int i = 0; i < choices.length; i++) {
+                if (choices[i]['isCorrect'] == true) {
+                  correctAnswerIndex = i;
+                  break;
+                }
+              }
+            }
+
+            return {
+              'id': q['id'],
+              'question': q['questionTitle']?.toString() ?? q['question']?.toString() ?? '',
+              'options': options,
+              'correctAnswer': correctAnswerIndex,
+              'tag': q['tag']?.toString() ?? '',
+            };
+          }).toList();
+
+          if (questions.isEmpty) {
+            // Use fallback if no questions found
+            questions = _fallbackQuestions;
+          }
+
+          setState(() {
+            _isLoadingQuestions = false;
+          });
+          startTimer();
+        } else {
+          // Use fallback questions
+          setState(() {
+            questions = _fallbackQuestions;
+            _isLoadingQuestions = false;
+          });
+          startTimer();
+        }
+      } else {
+        throw Exception('Failed to fetch questions: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error fetching questions: $e');
+      setState(() {
+        _errorMessage = 'Failed to load questions. Using sample questions.';
+        questions = _fallbackQuestions;
+        _isLoadingQuestions = false;
+      });
+      startTimer();
+    }
   }
 
   @override
   void dispose() {
     _timer?.cancel();
+    _dio.close();
     super.dispose();
   }
 
@@ -169,7 +275,8 @@ class _SkillTestQuizScreenState extends State<SkillTestQuizScreen> {
     // Calculate score and time used
     int correctAnswers = 0;
     selectedAnswers.forEach((questionIndex, selectedOption) {
-      if (questions[questionIndex]['correctAnswer'] == selectedOption) {
+      if (questionIndex < questions.length &&
+          questions[questionIndex]['correctAnswer'] == selectedOption) {
         correctAnswers++;
       }
     });
@@ -181,6 +288,11 @@ class _SkillTestQuizScreenState extends State<SkillTestQuizScreen> {
     String timeUsed =
         '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
 
+    // Calculate score percentage
+    double scorePercentage = questions.isNotEmpty
+        ? (correctAnswers / questions.length) * 100
+        : 0.0;
+
     Get.off(
       () => SkillTestResultScreen(
         jobTitle: widget.jobTitle,
@@ -189,12 +301,81 @@ class _SkillTestQuizScreenState extends State<SkillTestQuizScreen> {
         correctAnswers: correctAnswers,
         attemptedQuestions: selectedAnswers.length,
         timeUsed: timeUsed,
+        scorePercentage: scorePercentage,
+        passingScore: _passingScore ?? 80,
+        jobData: widget.jobData,
+        skillTestAnswers: selectedAnswers,
+        questions: questions,
+        goodFitAnswer: widget.goodFitAnswer,
+        startDate: widget.startDate,
+        shareProfile: widget.shareProfile,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoadingQuestions) {
+      return SafeArea(
+        child: Scaffold(
+          backgroundColor: Color(0xFFE8EEFA),
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16.h),
+                Text(
+                  'Loading questions...',
+                  style: TextStyle(
+                    fontSize: 16.sp,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (questions.isEmpty) {
+      return SafeArea(
+        child: Scaffold(
+          backgroundColor: Color(0xFFE8EEFA),
+          body: Center(
+            child: Padding(
+              padding: EdgeInsets.all(20.w),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.error_outline,
+                    size: 64.sp,
+                    color: Colors.red,
+                  ),
+                  SizedBox(height: 16.h),
+                  Text(
+                    _errorMessage ?? 'No questions available',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 16.sp,
+                      color: Colors.grey[700],
+                    ),
+                  ),
+                  SizedBox(height: 24.h),
+                  ElevatedButton(
+                    onPressed: () => Get.back(),
+                    child: Text('Go Back'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     final currentQuestion = questions[currentQuestionIndex];
     final isLastQuestion = currentQuestionIndex == questions.length - 1;
 
@@ -560,6 +741,19 @@ class _SkillTestQuizScreenState extends State<SkillTestQuizScreen> {
                     // Next button
                     GestureDetector(
                       onTap: () {
+                        // Validate that an answer is selected for current question
+                        if (!selectedAnswers.containsKey(currentQuestionIndex)) {
+                          Get.snackbar(
+                            'Answer Required',
+                            'Please select an answer before proceeding.',
+                            backgroundColor: Colors.orange,
+                            colorText: Colors.white,
+                            snackPosition: SnackPosition.BOTTOM,
+                            duration: Duration(seconds: 2),
+                          );
+                          return;
+                        }
+
                         if (isLastQuestion) {
                           // Check result
                           submitTest();

@@ -8,11 +8,19 @@ import 'skill_test_quiz_screen.dart';
 class SkillTestScreen extends StatelessWidget {
   final String jobTitle;
   final String company;
+  final Map<String, dynamic>? jobData;
+  final String? goodFitAnswer;
+  final String? startDate;
+  final bool? shareProfile;
 
   const SkillTestScreen({
     super.key,
-    this.jobTitle = 'Data Center Technician',
-    this.company = 'EdgeCore Systems',
+    required this.jobTitle,
+    required this.company,
+    this.jobData,
+    this.goodFitAnswer,
+    this.startDate,
+    this.shareProfile,
   });
 
   @override
@@ -447,6 +455,10 @@ class SkillTestScreen extends StatelessWidget {
                                       () => SkillTestQuizScreen(
                                         jobTitle: jobTitle,
                                         company: company,
+                                        jobData: jobData,
+                                        goodFitAnswer: goodFitAnswer,
+                                        startDate: startDate,
+                                        shareProfile: shareProfile,
                                       ),
                                     );
                                   },

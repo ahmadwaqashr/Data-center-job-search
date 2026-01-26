@@ -594,37 +594,40 @@ class _HomeScreenState extends State<HomeScreen> {
     required Color badgeColor,
     Map<String, dynamic>? jobData,
   }) {
+    // Check if job is applied
+    final isApplied = jobData != null && (jobData['applied'] == true || jobData['applicationStatus'] == 'applied');
+    
     return GestureDetector(
-      onTap:
-          () {
-            // If jobData is provided (from API), use it directly
-            // Otherwise, construct from individual parameters
-            final dataToPass = jobData ?? {
-              'jobTitle': title,
-              'companyName': company.split(' • ')[0],
-              'workType':
-                  company.contains('Full-time')
-                      ? 'Full-time'
-                      : company.contains('Hybrid')
-                      ? 'Hybrid'
-                      : 'Full-time',
-              'shifts': tags.isNotEmpty ? [tags[0]] : ['Shift-based'],
-              'locationType': tags.length > 1 ? tags[1] : 'On-site',
-              'location': location.split(' • ')[0],
-              'createdAt': location.contains('Posted')
-                  ? location.split(' • ')[1]
-                  : 'Posted recently',
-              'minPay': 0,
-              'maxPay': 0,
-              'salaryType': salary.contains('hr') ? 'hr' : 'monthly',
-            };
-            
-            Get.to(
-              () => JobDetailScreen(
-                jobData: dataToPass,
-              ),
-            );
-          },
+      onTap: () {
+        // Always allow navigation to job detail, even if applied
+        // If jobData is provided (from API), use it directly
+        // Otherwise, construct from individual parameters
+        final dataToPass = jobData ?? {
+          'jobTitle': title,
+          'companyName': company.split(' • ')[0],
+          'workType':
+              company.contains('Full-time')
+                  ? 'Full-time'
+                  : company.contains('Hybrid')
+                  ? 'Hybrid'
+                  : 'Full-time',
+          'shifts': tags.isNotEmpty ? [tags[0]] : ['Shift-based'],
+          'locationType': tags.length > 1 ? tags[1] : 'On-site',
+          'location': location.split(' • ')[0],
+          'createdAt': location.contains('Posted')
+              ? location.split(' • ')[1]
+              : 'Posted recently',
+          'minPay': 0,
+          'maxPay': 0,
+          'salaryType': salary.contains('hr') ? 'hr' : 'monthly',
+        };
+        
+        Get.to(
+          () => JobDetailScreen(
+            jobData: dataToPass,
+          ),
+        );
+      },
       child: Container(
         padding: EdgeInsets.all(16),
         decoration: BoxDecoration(
@@ -694,26 +697,47 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 SizedBox(width: 8.w),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: 10.w,
-                    vertical: 5.h,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.withOpacity(.2),
-                    borderRadius: BorderRadius.circular(15.r),
-                  ),
-                  child: Text(
-                    badge,
-                    style: TextStyle(
-                      fontSize: 11.sp,
-                      color: Colors.black,
-                      fontWeight: FontWeight.w600,
+                // Show applied badge if job is applied, otherwise show regular badge
+                if (jobData != null && (jobData['applied'] == true || jobData['applicationStatus'] == 'applied'))
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 10.w,
+                      vertical: 5.h,
                     ),
-                    overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
+                    decoration: BoxDecoration(
+                      color: Color(0xFF10B981).withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(15.r),
+                    ),
+                    child: Text(
+                      'Applied',
+                      style: TextStyle(
+                        fontSize: 11.sp,
+                        color: Color(0xFF10B981),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: 10.w,
+                      vertical: 5.h,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.withOpacity(.2),
+                      borderRadius: BorderRadius.circular(15.r),
+                    ),
+                    child: Text(
+                      badge,
+                      style: TextStyle(
+                        fontSize: 11.sp,
+                        color: Colors.black,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
                   ),
-                ),
               ],
             ),
             SizedBox(height: 10.h),
@@ -773,34 +797,45 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 SizedBox(width: 8.w),
                 Flexible(
-                  child: Container(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: 20.w,
-                      vertical: 10.h,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.primaryColor,
-                      borderRadius: BorderRadius.circular(25.r),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(.25),
-                          blurRadius: 20,
-                        ),
-                      ],
-                    ),
-                    child: Text(
-                      salary.contains('hr')
-                          ? 'Quick apply'
-                          : salary.contains('82k')
-                          ? 'Save & apply'
-                          : 'Apply now',
-                      style: TextStyle(
-                        fontSize: 13.sp,
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
+                  child: Opacity(
+                    opacity: isApplied ? 0.6 : 1.0,
+                    child: Container(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: 20.w,
+                        vertical: 10.h,
                       ),
-                      textAlign: TextAlign.center,
-                      overflow: TextOverflow.ellipsis,
+                      decoration: BoxDecoration(
+                        color: isApplied
+                            ? Colors.grey[300]
+                            : AppColors.primaryColor,
+                        borderRadius: BorderRadius.circular(25.r),
+                        boxShadow: isApplied
+                            ? []
+                            : [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(.25),
+                                  blurRadius: 20,
+                                ),
+                              ],
+                      ),
+                      child: Text(
+                        isApplied
+                            ? 'Applied'
+                            : (salary.contains('hr')
+                                ? 'Quick apply'
+                                : salary.contains('82k')
+                                ? 'Save & apply'
+                                : 'Apply now'),
+                        style: TextStyle(
+                          fontSize: 13.sp,
+                          color: isApplied
+                              ? Colors.grey[700]
+                              : Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                        textAlign: TextAlign.center,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
                 ),

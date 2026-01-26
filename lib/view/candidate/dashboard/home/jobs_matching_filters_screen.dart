@@ -734,24 +734,44 @@ class _JobsMatchingFiltersScreenState extends State<JobsMatchingFiltersScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                Container(
-                  padding: EdgeInsets.symmetric(
-                    horizontal: 10.w,
-                    vertical: 5.h,
-                  ),
-                  decoration: BoxDecoration(
-                    color: matchColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(15.r),
-                  ),
-                  child: Text(
-                    matchLevel,
-                    style: TextStyle(
-                      fontSize: 12.sp,
-                      color: matchColor,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
+                // Show applied badge if job is applied, otherwise show regular badge
+                (job['applied'] == true || job['applicationStatus'] == 'applied')
+                    ? Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 10.w,
+                          vertical: 5.h,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Color(0xFF10B981).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(15.r),
+                        ),
+                        child: Text(
+                          'Applied',
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            color: Color(0xFF10B981),
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      )
+                    : Container(
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 10.w,
+                          vertical: 5.h,
+                        ),
+                        decoration: BoxDecoration(
+                          color: matchColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(15.r),
+                        ),
+                        child: Text(
+                          matchLevel,
+                          style: TextStyle(
+                            fontSize: 12.sp,
+                            color: matchColor,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
               ],
             ),
             SizedBox(height: 8.h),
@@ -809,14 +829,20 @@ class _JobsMatchingFiltersScreenState extends State<JobsMatchingFiltersScreen> {
                         vertical: 10.h,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.primaryColor,
+                        color: (job['applied'] == true || job['applicationStatus'] == 'applied')
+                            ? Colors.grey[300]
+                            : AppColors.primaryColor,
                         borderRadius: BorderRadius.circular(20.r),
                       ),
                       child: Text(
-                        'Quick apply',
+                        (job['applied'] == true || job['applicationStatus'] == 'applied')
+                            ? 'Applied'
+                            : 'Quick apply',
                         style: TextStyle(
                           fontSize: 14.sp,
-                          color: Colors.white,
+                          color: (job['applied'] == true || job['applicationStatus'] == 'applied')
+                              ? Colors.grey[700]
+                              : Colors.white,
                           fontWeight: FontWeight.w500,
                         ),
                       ),

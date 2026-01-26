@@ -1,8 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import '../../../candidate/dashboard/messages/chat_screen.dart';
 import 'move_to_interview_screen.dart';
 
@@ -15,6 +19,9 @@ class CandidateDetailsScreen extends StatefulWidget {
   final String? availability;
   final String matchPercent;
   final String stage;
+  final int? candidateId;
+  final int? applicationId;
+  final Map<String, dynamic>? candidateData;
 
   const CandidateDetailsScreen({
     super.key,
@@ -26,6 +33,9 @@ class CandidateDetailsScreen extends StatefulWidget {
     this.availability,
     required this.matchPercent,
     required this.stage,
+    this.candidateId,
+    this.applicationId,
+    this.candidateData,
   });
 
   @override
@@ -34,6 +44,219 @@ class CandidateDetailsScreen extends StatefulWidget {
 
 class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
   int _selectedTab = 0; // 0: Profile, 1: CV, 2: Activity
+  String? _selectedStage;
+  bool _showStageDropdown = false;
+  final Dio _dio = Dio();
+  bool _isUpdatingStage = false;
+  Map<String, dynamic>? _candidateDetails;
+  bool _isLoadingDetails = false;
+  
+  final List<String> _stages = [
+    'Pending',
+    'Initial screening',
+    'Technical interview',
+    'Offer & onboarding'
+  ];
+  
+  // Helper method to format stage for display
+  String _formatStageForDisplay(String stage) {
+    if (stage.isEmpty) return stage;
+    return stage[0].toUpperCase() + stage.substring(1);
+  }
+  
+  @override
+  void initState() {
+    super.initState();
+    _selectedStage = widget.stage;
+    if (widget.candidateId != null || widget.applicationId != null) {
+      _fetchCandidateDetails();
+    }
+  }
+
+  @override
+  void dispose() {
+    _dio.close();
+    super.dispose();
+  }
+
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    if (authToken != null && authToken.isNotEmpty) {
+      return authToken;
+    }
+
+    final userDataString = prefs.getString('user_data');
+    if (userDataString != null) {
+      final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      final token = userData['token']?.toString();
+      if (token != null && token.isNotEmpty) {
+        return token;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _fetchCandidateDetails() async {
+    if (widget.applicationId == null && widget.candidateId == null) {
+      return;
+    }
+
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        print('⚠️ No auth token for fetching candidate details');
+        return;
+      }
+
+      setState(() {
+        _isLoadingDetails = true;
+      });
+
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchCandidateDetails),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode({
+          'applicationId': widget.applicationId,
+          'candidateId': widget.candidateId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        print('✅ Candidate Details API Response: ${jsonEncode(responseData)}');
+        if (responseData['success'] == true && responseData['data'] != null) {
+          setState(() {
+            _candidateDetails = responseData['data'] as Map<String, dynamic>;
+            _isLoadingDetails = false;
+          });
+          print('👤 Candidate details loaded');
+        } else {
+          print('⚠️ Candidate Details API returned success=false');
+          setState(() {
+            _isLoadingDetails = false;
+          });
+        }
+      } else {
+        print('⚠️ Candidate Details API returned status: ${response.statusCode}');
+        setState(() {
+          _isLoadingDetails = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error fetching candidate details: $e');
+      if (e is DioException) {
+        print('   Status: ${e.response?.statusCode}');
+        print('   Message: ${e.response?.data}');
+      }
+      setState(() {
+        _isLoadingDetails = false;
+      });
+    }
+  }
+
+  Future<void> _updateCandidateStage(String newStage) async {
+    if (widget.applicationId == null) {
+      Get.snackbar(
+        'Error',
+        'Application ID not found',
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      return;
+    }
+
+    setState(() {
+      _isUpdatingStage = true;
+    });
+
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        Get.snackbar(
+          'Error',
+          'Authentication required',
+          backgroundColor: Colors.red,
+          colorText: Colors.white,
+          snackPosition: SnackPosition.BOTTOM,
+        );
+        setState(() {
+          _isUpdatingStage = false;
+        });
+        return;
+      }
+
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.updateCandidateStage),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode({
+          'applicationId': widget.applicationId,
+          'stage': newStage.toLowerCase(),
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        print('✅ Update Stage API Response: ${jsonEncode(responseData)}');
+        if (responseData['success'] == true) {
+          setState(() {
+            _selectedStage = newStage;
+            _isUpdatingStage = false;
+          });
+          
+          Get.snackbar(
+            'Success',
+            responseData['message'] ?? 'Stage updated successfully',
+            backgroundColor: Color(0xFF10B981),
+            colorText: Colors.white,
+            snackPosition: SnackPosition.BOTTOM,
+            duration: Duration(seconds: 2),
+          );
+          
+          // Refresh candidate details after stage update
+          _fetchCandidateDetails();
+        } else {
+          throw Exception(responseData['message'] ?? 'Failed to update stage');
+        }
+      } else {
+        throw Exception('Server returned status ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error updating stage: $e');
+      String errorMessage = 'Failed to update stage';
+      if (e is DioException) {
+        if (e.response?.data is Map<String, dynamic>) {
+          errorMessage = e.response?.data['message'] ?? errorMessage;
+        }
+      }
+      
+      Get.snackbar(
+        'Error',
+        errorMessage,
+        backgroundColor: Colors.red,
+        colorText: Colors.white,
+        snackPosition: SnackPosition.BOTTOM,
+      );
+      
+      setState(() {
+        _isUpdatingStage = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -208,6 +431,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
+                                            _candidateDetails?['candidate']?['fullName'] ?? 
                                             widget.candidateName,
                                             style: TextStyle(
                                               fontSize: 18.sp,
@@ -217,7 +441,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                           ),
                                           SizedBox(height: 4.h),
                                           Text(
-                                            '${widget.experience} • ${widget.shiftType} • ${widget.location}',
+                                            '${_candidateDetails?['candidate']?['experienced'] ?? widget.experience} • ${widget.shiftType} • ${_candidateDetails?['candidate']?['location'] ?? widget.location}',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               color: Colors.grey[600],
@@ -240,7 +464,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                         ),
                                       ),
                                       child: Text(
-                                        'Match\n${widget.matchPercent}',
+                                        'Match\n${_candidateDetails?['application']?['matchPercent'] ?? widget.matchPercent}',
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
                                           fontSize: 13.sp,
@@ -265,7 +489,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                         borderRadius: BorderRadius.circular(15),
                                       ),
                                       child: Text(
-                                        'Skill test ${widget.skillTest}',
+                                        'Skill test ${_candidateDetails?['application']?['skillTestScore']?.toStringAsFixed(0) ?? widget.skillTest}%',
                                         style: TextStyle(
                                           fontSize: 13.sp,
                                           color: Colors.grey[700],
@@ -415,7 +639,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                             ),
                                             SizedBox(width: 6.w),
                                             Text(
-                                              'In screening',
+                                              _formatStageForDisplay(_selectedStage ?? widget.stage),
                                               style: TextStyle(
                                                 fontSize: 14.sp,
                                                 color: AppColors.primaryColor,
@@ -426,38 +650,111 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                         ),
                                       ],
                                     ),
-                                    Container(
-                                      padding: EdgeInsets.symmetric(
-                                        horizontal: 5.w,
-                                        vertical: 5.h,
-                                      ),
-                                      decoration: BoxDecoration(
-                                        color: Colors.grey[100],
-                                        borderRadius: BorderRadius.circular(
-                                          20.r,
+                                    GestureDetector(
+                                      onTap: () {
+                                        setState(() {
+                                          _showStageDropdown = !_showStageDropdown;
+                                        });
+                                      },
+                                      child: Container(
+                                        padding: EdgeInsets.symmetric(
+                                          horizontal: 5.w,
+                                          vertical: 5.h,
                                         ),
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          Text(
-                                            'Change stage',
-                                            style: TextStyle(
-                                              fontSize: 13.sp,
-                                              color: Colors.grey[700],
-                                              fontWeight: FontWeight.w500,
+                                        decoration: BoxDecoration(
+                                          color: Colors.grey[100],
+                                          borderRadius: BorderRadius.circular(
+                                            20.r,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Text(
+                                              'Change stage',
+                                              style: TextStyle(
+                                                fontSize: 13.sp,
+                                                color: Colors.grey[700],
+                                                fontWeight: FontWeight.w500,
+                                              ),
                                             ),
-                                          ),
-                                          SizedBox(width: 4.w),
-                                          Icon(
-                                            Icons.keyboard_arrow_down,
-                                            size: 18.sp,
-                                            color: Colors.grey[700],
-                                          ),
-                                        ],
+                                            SizedBox(width: 4.w),
+                                            Icon(
+                                              _showStageDropdown
+                                                  ? Icons.keyboard_arrow_up
+                                                  : Icons.keyboard_arrow_down,
+                                              size: 18.sp,
+                                              color: Colors.grey[700],
+                                            ),
+                                          ],
+                                        ),
                                       ),
                                     ),
                                   ],
                                 ),
+                                // Stage dropdown
+                                if (_showStageDropdown) ...[
+                                  SizedBox(height: 12.h),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.grey[50],
+                                      borderRadius: BorderRadius.circular(12.r),
+                                      border: Border.all(
+                                        color: Colors.grey[300]!,
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: Column(
+                                      children: _stages.map((stage) {
+                                        final isSelected = _selectedStage == stage;
+                                        return GestureDetector(
+                                          onTap: _isUpdatingStage
+                                              ? null
+                                              : () {
+                                                  setState(() {
+                                                    _showStageDropdown = false;
+                                                  });
+                                                  _updateCandidateStage(stage);
+                                                },
+                                          child: Container(
+                                            padding: EdgeInsets.symmetric(
+                                              horizontal: 16.w,
+                                              vertical: 12.h,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: isSelected
+                                                  ? AppColors.primaryColor.withOpacity(0.1)
+                                                  : Colors.transparent,
+                                              borderRadius: BorderRadius.circular(12.r),
+                                            ),
+                                            child: Row(
+                                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                Text(
+                                                  stage,
+                                                  style: TextStyle(
+                                                    fontSize: 14.sp,
+                                                    color: isSelected
+                                                        ? AppColors.primaryColor
+                                                        : Colors.black,
+                                                    fontWeight: isSelected
+                                                        ? FontWeight.w600
+                                                        : FontWeight.normal,
+                                                  ),
+                                                ),
+                                                if (isSelected)
+                                                  Icon(
+                                                    Icons.check,
+                                                    color: AppColors.primaryColor,
+                                                    size: 20.sp,
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        );
+                                      }).toList(),
+                                    ),
+                                  ),
+                                ],
                                 SizedBox(height: 16.h),
                                 Row(
                                   children: [
@@ -470,7 +767,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                                   widget.candidateName,
                                               jobTitle:
                                                   'Data Center Technician',
-                                              currentStage: widget.stage,
+                                              currentStage: _selectedStage ?? widget.stage,
                                             ),
                                           );
                                         },

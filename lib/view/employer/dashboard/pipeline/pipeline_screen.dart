@@ -1,9 +1,13 @@
+import 'dart:convert';
 import 'package:data_center_job/view/employer/dashboard/pipeline/move_to_interview_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import '../candidate/move_to_offer_screen.dart';
 import 'candidate_details_screen.dart';
 
@@ -11,12 +15,16 @@ class PipelineScreen extends StatefulWidget {
   final String jobTitle;
   final String location;
   final int totalCandidates;
+  final int? jobId;
+  final Map<String, dynamic>? jobData;
 
   const PipelineScreen({
     super.key,
     required this.jobTitle,
     required this.location,
     required this.totalCandidates,
+    this.jobId,
+    this.jobData,
   });
 
   @override
@@ -24,6 +32,135 @@ class PipelineScreen extends StatefulWidget {
 }
 
 class _PipelineScreenState extends State<PipelineScreen> {
+  final Dio _dio = Dio();
+  List<Map<String, dynamic>> _candidates = [];
+  bool _isLoadingCandidates = true;
+  String? _selectedStageFilter = 'In screening';
+  
+  // Stage counts
+  int _appliedCount = 0;
+  int _screeningCount = 0;
+  int _interviewsCount = 0;
+  @override
+  void initState() {
+    super.initState();
+    _fetchCandidates();
+  }
+
+  @override
+  void dispose() {
+    _dio.close();
+    super.dispose();
+  }
+
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    if (authToken != null && authToken.isNotEmpty) {
+      return authToken;
+    }
+
+    final userDataString = prefs.getString('user_data');
+    if (userDataString != null) {
+      final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      final token = userData['token']?.toString();
+      if (token != null && token.isNotEmpty) {
+        return token;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _fetchCandidates() async {
+    if (widget.jobId == null) {
+      setState(() {
+        _isLoadingCandidates = false;
+      });
+      return;
+    }
+
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        print('⚠️ No auth token for fetching candidates');
+        setState(() {
+          _isLoadingCandidates = false;
+        });
+        return;
+      }
+
+      setState(() {
+        _isLoadingCandidates = true;
+      });
+
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchCandidatesByJob),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode({
+          'jobId': widget.jobId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        print('✅ Candidates API Response: ${jsonEncode(responseData)}');
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final candidatesData = responseData['data'] as List<dynamic>;
+          final candidates = candidatesData.map((c) => c as Map<String, dynamic>).toList();
+          
+          // Count by stage
+          int applied = 0, screening = 0, interviews = 0;
+          for (var candidate in candidates) {
+            final stage = candidate['stage']?.toString().toLowerCase() ?? 
+                         candidate['applicationStatus']?.toString().toLowerCase() ?? '';
+            if (stage.contains('pending') || stage.contains('applied')) {
+              applied++;
+            } else if (stage.contains('screening')) {
+              screening++;
+            } else if (stage.contains('interview')) {
+              interviews++;
+            }
+          }
+          
+          setState(() {
+            _candidates = candidates;
+            _appliedCount = applied;
+            _screeningCount = screening;
+            _interviewsCount = interviews;
+            _isLoadingCandidates = false;
+          });
+          print('👥 Loaded ${candidates.length} candidates: $applied applied, $screening screening, $interviews interviews');
+        } else {
+          print('⚠️ Candidates API returned success=false');
+          setState(() {
+            _isLoadingCandidates = false;
+          });
+        }
+      } else {
+        print('⚠️ Candidates API returned status: ${response.statusCode}');
+        setState(() {
+          _isLoadingCandidates = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error fetching candidates: $e');
+      if (e is DioException) {
+        print('   Status: ${e.response?.statusCode}');
+        print('   Message: ${e.response?.data}');
+      }
+      setState(() {
+        _isLoadingCandidates = false;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
@@ -210,7 +347,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                 ),
                                 SizedBox(height: 6.h),
                                 Text(
-                                  'EdgeCore Systems • Seattle, WA • On-site',
+                                  '${widget.jobData?['companyName'] ?? 'Company'} • ${widget.location} • ${widget.jobData?['locationType'] ?? 'On-site'}',
                                   style: TextStyle(
                                     fontSize: 13.sp,
                                     color: Colors.grey[600],
@@ -219,12 +356,27 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                 SizedBox(height: 6.h),
                                 Row(
                                   children: [
-                                    Text(
-                                      '\$38-45/hr • Shift-based • Posted 2h ago',
-                                      style: TextStyle(
-                                        fontSize: 13.sp,
-                                        color: Colors.grey[600],
-                                      ),
+                                    Builder(
+                                      builder: (context) {
+                                        final minPay = widget.jobData?['minPay']?.toDouble() ?? 0.0;
+                                        final maxPay = widget.jobData?['maxPay']?.toDouble() ?? 0.0;
+                                        final salaryType = widget.jobData?['salaryType']?.toString().toLowerCase() ?? 'monthly';
+                                        String salary = '';
+                                        if (salaryType == 'hr' || salaryType == 'hourly') {
+                                          salary = '\$${minPay.toStringAsFixed(0)}-\$${maxPay.toStringAsFixed(0)}/hr';
+                                        } else {
+                                          final minK = (minPay / 1000).toStringAsFixed(0);
+                                          final maxK = (maxPay / 1000).toStringAsFixed(0);
+                                          salary = '\$${minK}k-\$${maxK}k';
+                                        }
+                                        return Text(
+                                          '$salary • ${widget.jobData?['workType'] ?? 'Full-time'} • Posted ${_formatTimeAgo(widget.jobData?['createdAt']?.toString())}',
+                                          style: TextStyle(
+                                            fontSize: 13.sp,
+                                            color: Colors.grey[600],
+                                          ),
+                                        );
+                                      },
                                     ),
                                   ],
                                 ),
@@ -255,7 +407,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                                     BorderRadius.circular(15),
                                               ),
                                               child: Text(
-                                                '12 candidates',
+                                                '${widget.totalCandidates} candidates',
                                                 style: TextStyle(
                                                   fontSize: 13.sp,
                                                   color: Colors.grey[700],
@@ -276,7 +428,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                                     BorderRadius.circular(15),
                                               ),
                                               child: Text(
-                                                '4 in screening',
+                                                '$_screeningCount in screening',
                                                 style: TextStyle(
                                                   fontSize: 13.sp,
                                                   color: Colors.grey[700],
@@ -298,7 +450,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                             ),
                                           ),
                                           child: Text(
-                                            '2 interviews',
+                                            '$_interviewsCount interviews',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               color: Colors.grey[700],
@@ -308,7 +460,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                       ],
                                     ),
                                     Text(
-                                      'Job ID • #DCT-\n204',
+                                      'Job ID • #${widget.jobData?['referenceId'] ?? widget.jobId ?? 'N/A'}',
                                       style: TextStyle(
                                         fontSize: 12.sp,
                                         color: Colors.grey[600],
@@ -367,24 +519,30 @@ class _PipelineScreenState extends State<PipelineScreen> {
                               Expanded(
                                 child: _buildPipelineStageCard(
                                   'Applied',
-                                  '12',
-                                  '100%',
+                                  '$_appliedCount',
+                                  widget.totalCandidates > 0 
+                                      ? '${((_appliedCount / widget.totalCandidates) * 100).toStringAsFixed(0)}%'
+                                      : '0%',
                                 ),
                               ),
                               SizedBox(width: 12.w),
                               Expanded(
                                 child: _buildPipelineStageCard(
                                   'In screening',
-                                  '4',
-                                  '33%',
+                                  '$_screeningCount',
+                                  widget.totalCandidates > 0
+                                      ? '${((_screeningCount / widget.totalCandidates) * 100).toStringAsFixed(0)}%'
+                                      : '0%',
                                 ),
                               ),
                               SizedBox(width: 12.w),
                               Expanded(
                                 child: _buildPipelineStageCard(
                                   'Interviews',
-                                  '2',
-                                  '17%',
+                                  '$_interviewsCount',
+                                  widget.totalCandidates > 0
+                                      ? '${((_interviewsCount / widget.totalCandidates) * 100).toStringAsFixed(0)}%'
+                                      : '0%',
                                 ),
                               ),
                             ],
@@ -398,7 +556,18 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    'In screening • 4 candidates',
+                                    '$_selectedStageFilter • ${_candidates.where((c) {
+                                      final stage = c['stage']?.toString().toLowerCase() ?? 
+                                                   c['applicationStatus']?.toString().toLowerCase() ?? '';
+                                      if (_selectedStageFilter == 'In screening') {
+                                        return stage.contains('screening');
+                                      } else if (_selectedStageFilter == 'Interviews') {
+                                        return stage.contains('interview');
+                                      } else if (_selectedStageFilter == 'Applied') {
+                                        return stage.contains('pending') || stage.contains('applied');
+                                      }
+                                      return true;
+                                    }).length} candidates',
                                     style: TextStyle(
                                       fontSize: 16.sp,
                                       fontWeight: FontWeight.bold,
@@ -415,29 +584,72 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                   ),
                                 ],
                               ),
-                              Row(
-                                children: [
-                                  Text(
-                                    'Stage',
-                                    style: TextStyle(
-                                      fontSize: 13.sp,
-                                      color: Colors.grey[700],
-                                      fontWeight: FontWeight.w500,
+                              GestureDetector(
+                                onTap: () {
+                                  // Show stage filter dropdown
+                                  showModalBottomSheet(
+                                    context: context,
+                                    backgroundColor: Colors.transparent,
+                                    builder: (context) => Container(
+                                      padding: EdgeInsets.all(20.w),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.vertical(top: Radius.circular(20.r)),
+                                      ),
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Text(
+                                            'Filter by stage',
+                                            style: TextStyle(
+                                              fontSize: 18.sp,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          SizedBox(height: 16.h),
+                                          ...['Applied', 'In screening', 'Interviews'].map((stage) {
+                                            return ListTile(
+                                              title: Text(stage),
+                                              trailing: _selectedStageFilter == stage
+                                                  ? Icon(Icons.check, color: AppColors.primaryColor)
+                                                  : null,
+                                              onTap: () {
+                                                setState(() {
+                                                  _selectedStageFilter = stage;
+                                                });
+                                                Navigator.pop(context);
+                                              },
+                                            );
+                                          }).toList(),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                                  SizedBox(width: 4.w),
-                                  Icon(
-                                    Icons.keyboard_arrow_down,
-                                    size: 18.sp,
-                                    color: Colors.grey[700],
-                                  ),
-                                ],
+                                  );
+                                },
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      'Stage',
+                                      style: TextStyle(
+                                        fontSize: 13.sp,
+                                        color: Colors.grey[700],
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                    SizedBox(width: 4.w),
+                                    Icon(
+                                      Icons.keyboard_arrow_down,
+                                      size: 18.sp,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ],
+                                ),
                               ),
                             ],
                           ),
                           SizedBox(height: 16.h),
                           Text(
-                            'Current stage • In screening',
+                            'Current stage • $_selectedStageFilter',
                             style: TextStyle(
                               fontSize: 13.sp,
                               color: Colors.grey[600],
@@ -445,53 +657,84 @@ class _PipelineScreenState extends State<PipelineScreen> {
                           ),
                           SizedBox(height: 16.h),
                           // Candidate cards
-                          _buildCandidateCard(
-                            name: 'Alex Johnson',
-                            experience: '4 yrs',
-                            shiftType: 'Night shifts',
-                            location: 'Seattle, WA',
-                            skillTest: '92%',
-                            availability: 'Available in 2 weeks',
-                            matchPercent: '94%',
-                            actionText: 'Move to interview',
-                            stage: 'In screening',
-                            actionType: 'interview',
-                          ),
-                          SizedBox(height: 12.h),
-                          _buildCandidateCard(
-                            name: 'Maria Chen',
-                            experience: '3 yrs',
-                            shiftType: 'On-site only',
-                            location: 'Bellevue, WA',
-                            skillTest: '86%',
-                            availability: null,
-                            matchPercent: '88%',
-                            actionText: 'Make Offer',
-                            actionIcon: Icons.calendar_today,
-                            stage: 'In screening',
-                            actionType: 'offer',
-                          ),
-                          SizedBox(height: 20.h),
-                          Text(
-                            'Next stage • Interviews (2)',
-                            style: TextStyle(
-                              fontSize: 13.sp,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                          SizedBox(height: 16.h),
-                          _buildCandidateCard(
-                            name: 'Jordan Lee',
-                            experience: '5 yrs',
-                            shiftType: 'Field Technician',
-                            location: 'Tacoma, WA',
-                            skillTest: '89%',
-                            availability: 'Interview tomorrow',
-                            matchPercent: '90%',
-                            actionText: 'View details',
-                            stage: 'Interview',
-                            actionType: 'details',
-                          ),
+                          if (_isLoadingCandidates)
+                            Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(20.h),
+                                child: CircularProgressIndicator(),
+                              ),
+                            )
+                          else if (_candidates.isEmpty)
+                            Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(20.h),
+                                child: Text(
+                                  'No candidates found',
+                                  style: TextStyle(
+                                    fontSize: 14.sp,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            ..._candidates.where((candidate) {
+                              final stage = candidate['stage']?.toString().toLowerCase() ?? 
+                                           candidate['applicationStatus']?.toString().toLowerCase() ?? '';
+                              if (_selectedStageFilter == 'In screening') {
+                                return stage.contains('screening');
+                              } else if (_selectedStageFilter == 'Interviews') {
+                                return stage.contains('interview');
+                              } else if (_selectedStageFilter == 'Applied') {
+                                return stage.contains('pending') || stage.contains('applied');
+                              }
+                              return true;
+                            }).map((candidate) {
+                              final applicationId = candidate['id'] ?? candidate['applicationId'];
+                              final candidateId = candidate['candidateId'] ?? candidate['candidate']?['id'];
+                              final candidateData = candidate['candidate'] ?? {};
+                              final name = candidateData['fullName'] ?? 
+                                          candidateData['fullname'] ?? 
+                                          candidate['candidateName'] ?? 
+                                          'Candidate';
+                              final experience = candidateData['experienced']?.toString() ?? 
+                                               candidateData['experience']?.toString() ?? 
+                                               'N/A';
+                              final location = candidateData['location'] ?? 'Location';
+                              final skillTestScore = candidate['skillTestScore']?.toDouble() ?? 
+                                                   candidate['skillTestScore']?.toDouble() ?? 
+                                                   0.0;
+                              final matchPercent = candidate['matchPercent']?.toString() ?? 
+                                                  candidate['matchPercentage']?.toString() ?? 
+                                                  '0%';
+                              final stage = candidate['stage'] ?? 
+                                          candidate['applicationStatus'] ?? 
+                                          'Pending';
+                              
+                              return Column(
+                                children: [
+                                  _buildCandidateCard(
+                                    name: name,
+                                    experience: '$experience yrs',
+                                    shiftType: 'Shift-based',
+                                    location: location,
+                                    skillTest: '${skillTestScore.toStringAsFixed(0)}%',
+                                    availability: candidate['startDate']?.toString(),
+                                    matchPercent: matchPercent,
+                                    actionText: stage == 'In screening' ? 'Move to interview' : 'View details',
+                                    actionIcon: stage == 'In screening' ? null : Icons.arrow_forward,
+                                    stage: stage.toString(),
+                                    actionType: stage.toString().toLowerCase().contains('screening') ? 'interview' : 'details',
+                                    candidateId: candidateId,
+                                    candidateData: {
+                                      ...candidate,
+                                      'id': applicationId, // Ensure applicationId is available
+                                    },
+                                  ),
+                                  SizedBox(height: 12.h),
+                                ],
+                              );
+                            }).toList(),
                           SizedBox(height: 30.h),
                         ],
                       ),
@@ -551,6 +794,29 @@ class _PipelineScreenState extends State<PipelineScreen> {
     );
   }
 
+  String _formatTimeAgo(String? createdAt) {
+    if (createdAt == null || createdAt.isEmpty) {
+      return 'recently';
+    }
+    try {
+      final date = DateTime.parse(createdAt);
+      final now = DateTime.now();
+      final difference = now.difference(date);
+      
+      if (difference.inDays > 0) {
+        return '${difference.inDays}${difference.inDays == 1 ? ' day' : ' days'} ago';
+      } else if (difference.inHours > 0) {
+        return '${difference.inHours}${difference.inHours == 1 ? ' hour' : ' hours'} ago';
+      } else if (difference.inMinutes > 0) {
+        return '${difference.inMinutes}${difference.inMinutes == 1 ? ' minute' : ' minutes'} ago';
+      } else {
+        return 'recently';
+      }
+    } catch (e) {
+      return 'recently';
+    }
+  }
+
   Widget _buildCandidateCard({
     required String name,
     required String experience,
@@ -563,21 +829,59 @@ class _PipelineScreenState extends State<PipelineScreen> {
     IconData? actionIcon,
     required String stage,
     String? actionType, // 'interview', 'offer', or 'details'
+    int? candidateId,
+    Map<String, dynamic>? candidateData,
   }) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16.r),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
+    return GestureDetector(
+      onTap: () {
+        print('🔵 Candidate card tapped: $name');
+        print('   actionType: $actionType');
+        print('   stage: $stage');
+        print('   candidateId: $candidateId');
+        print('   applicationId: ${candidateData?['id']}');
+        
+        try {
+          // Always navigate to CandidateDetailsScreen when card is clicked
+          print('🔵 Navigating to CandidateDetailsScreen');
+          Get.to(
+            () => CandidateDetailsScreen(
+              candidateName: name,
+              experience: experience,
+              shiftType: shiftType,
+              location: location,
+              skillTest: skillTest,
+              availability: availability,
+              matchPercent: matchPercent,
+              stage: stage,
+              candidateId: candidateId,
+              applicationId: candidateData?['id'],
+              candidateData: candidateData,
+            ),
+          );
+        } catch (e) {
+          print('❌ Navigation error: $e');
+          Get.snackbar(
+            'Error',
+            'Failed to navigate: ${e.toString()}',
+            backgroundColor: Colors.red,
+            colorText: Colors.white,
+          );
+        }
+      },
+      child: Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16.r),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
@@ -668,63 +972,23 @@ class _PipelineScreenState extends State<PipelineScreen> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              GestureDetector(
-                onTap: () {
-                  if (actionType == 'offer') {
-                    // Navigate to MoveToOfferScreen
-                    Get.to(
-                      () => MoveToOfferScreen(
-                        candidateName: name,
-                        jobTitle: widget.jobTitle,
-                        currentStage: stage,
-                      ),
-                    );
-                  } else if (actionType == 'interview') {
-                    // Navigate to Interview/Schedule screen
-                    Get.to(
-                      () => CandidateDetailsScreen(
-                          candidateName: 'MR XYZ',
-                          experience: experience,
-                          shiftType: shiftType,
-                          location: location,
-                          skillTest: skillTest,
-                          matchPercent: matchPercent,
-                          stage: stage)
-                    );
-                  } else {
-                    // Default: Navigate to CandidateDetailsScreen
-                    Get.to(
-                      () => CandidateDetailsScreen(
-                        candidateName: name,
-                        experience: experience,
-                        shiftType: shiftType,
-                        location: location,
-                        skillTest: skillTest,
-                        availability: availability,
-                        matchPercent: matchPercent,
-                        stage: stage,
-                      ),
-                    );
-                  }
-                },
-                child: Row(
-                  children: [
-                    Text(
-                      actionText,
-                      style: TextStyle(
-                        fontSize: 14.sp,
-                        color: AppColors.primaryColor,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(width: 4.w),
-                    Icon(
-                      actionIcon ?? Icons.arrow_forward,
+              Row(
+                children: [
+                  Text(
+                    actionText,
+                    style: TextStyle(
+                      fontSize: 14.sp,
                       color: AppColors.primaryColor,
-                      size: 14.sp,
+                      fontWeight: FontWeight.w600,
                     ),
-                  ],
-                ),
+                  ),
+                  SizedBox(width: 4.w),
+                  Icon(
+                    actionIcon ?? Icons.arrow_forward,
+                    color: AppColors.primaryColor,
+                    size: 14.sp,
+                  ),
+                ],
               ),
               Text(
                 stage,
@@ -733,6 +997,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
             ],
           ),
         ],
+      ),
       ),
     );
   }

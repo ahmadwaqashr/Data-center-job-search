@@ -1,7 +1,7 @@
 class ApiConfig {
   // Base URL for API endpoints
-  static const String baseUrl = 'https://datacenterjobs.onrender.com';
-  //static const String baseUrl = 'http://192.168.100.20:5000';
+  //static const String baseUrl = 'https://datacenterjobs.onrender.com';
+  static const String baseUrl = 'http://192.168.100.193:5000';
 
   // API Endpoints
   static const String fetchCoreExpertise = '/api/coreexpertise/fetch_coreExpertise';
@@ -21,6 +21,12 @@ class ApiConfig {
   static const String createTestQuestion = '/api/testquestion';
   static const String jobPosted = '/api/jobposted';
   static const String fetchJob = '/api/fetchjob';
+  static const String applyJob = '/api/appliedjob';
+  static const String fetchEmployerApplications = '/api/appliedjob/fetch_employer_applications';
+  static const String fetchEmployerOverview = '/api/appliedjob/fetch_employer_overview';
+  static const String fetchCandidatesByJob = '/api/appliedjob/fetch_candidates_by_job';
+  static const String fetchCandidateDetails = '/api/appliedjob/fetch_candidate_details';
+  static const String updateCandidateStage = '/api/appliedjob/update_candidate_stage';
   
   // Helper method to get edit skills URL with ID
   static String getEditSkillsUrl(int id) {

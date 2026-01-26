@@ -240,7 +240,25 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
         // Update SharedPreferences with new data
         final updatedUserData = response.data as Map<String, dynamic>;
-        await prefs.setString('user_data', jsonEncode(updatedUserData));
+        
+        // Get existing user data to merge (preserve CV and other fields not in response)
+        String? existingUserDataString = prefs.getString('user_data');
+        Map<String, dynamic> mergedUserData = {};
+        
+        if (existingUserDataString != null) {
+          try {
+            mergedUserData = jsonDecode(existingUserDataString) as Map<String, dynamic>;
+            print('   📋 Merging with existing user data to preserve CV and other fields');
+          } catch (e) {
+            print('   ⚠️ Could not parse existing user data: $e');
+          }
+        }
+        
+        // Merge: existing data first, then updated data (updated data takes precedence)
+        mergedUserData.addAll(updatedUserData);
+        
+        await prefs.setString('user_data', jsonEncode(mergedUserData));
+        print('   ✅ user_data updated with all fields preserved');
 
         // Ensure role is preserved in SharedPreferences
         if (_userRole != null) {

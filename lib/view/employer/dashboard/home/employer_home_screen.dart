@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:dio/dio.dart';
 
 import '../../../../constants/colors.dart';
 import '../../../../constants/api_config.dart';
@@ -19,11 +20,24 @@ class EmployerHomeScreen extends StatefulWidget {
 class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
+  final Dio _dio = Dio();
+  
+  // Overview stats
+  int _openRoles = 0;
+  int _activeCandidates = 0;
+  int _interviewsToday = 0;
+  int _pendingReviews = 0;
+  
+  // Jobs with candidates
+  List<Map<String, dynamic>> _jobs = [];
+  bool _isLoadingData = false;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    _fetchOverviewData();
+    _fetchJobsWithCandidates();
   }
 
   @override
@@ -32,6 +46,138 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
     // Reload user data when screen comes into focus for real-time updates
     if (mounted) {
       _loadUserData();
+      _fetchOverviewData();
+      _fetchJobsWithCandidates();
+    }
+  }
+
+  @override
+  void dispose() {
+    _dio.close();
+    super.dispose();
+  }
+
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    if (authToken != null && authToken.isNotEmpty) {
+      return authToken;
+    }
+
+    final userDataString = prefs.getString('user_data');
+    if (userDataString != null) {
+      final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      final token = userData['token']?.toString();
+      if (token != null && token.isNotEmpty) {
+        return token;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _fetchOverviewData() async {
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        print('⚠️ No auth token for fetching overview');
+        return;
+      }
+
+      setState(() {
+        _isLoadingData = true;
+      });
+
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchEmployerOverview),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode({}),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        print('✅ Overview API Response: ${jsonEncode(responseData)}');
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final data = responseData['data'] as Map<String, dynamic>;
+          setState(() {
+            _openRoles = (data['openRoles'] ?? data['openRolesCount'] ?? 0) as int;
+            _activeCandidates = (data['activeCandidates'] ?? data['activeCandidatesCount'] ?? 0) as int;
+            _interviewsToday = (data['interviewsToday'] ?? data['interviewsTodayCount'] ?? 0) as int;
+            _pendingReviews = (data['pendingReviews'] ?? data['pendingReviewsCount'] ?? 0) as int;
+            _isLoadingData = false;
+          });
+          print('📊 Overview loaded: $_openRoles roles, $_activeCandidates candidates');
+        } else {
+          print('⚠️ Overview API returned success=false');
+          setState(() {
+            _isLoadingData = false;
+          });
+        }
+      } else {
+        print('⚠️ Overview API returned status: ${response.statusCode}');
+        setState(() {
+          _isLoadingData = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error fetching overview data: $e');
+      if (e is DioException) {
+        print('   Status: ${e.response?.statusCode}');
+        print('   Message: ${e.response?.data}');
+      }
+      setState(() {
+        _isLoadingData = false;
+      });
+    }
+  }
+
+  Future<void> _fetchJobsWithCandidates() async {
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        print('⚠️ No auth token for fetching jobs');
+        return;
+      }
+
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchEmployerApplications),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode({}),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        print('✅ Jobs API Response: ${jsonEncode(responseData)}');
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final jobsData = responseData['data'] as List<dynamic>;
+          setState(() {
+            _jobs = jobsData.map((job) => job as Map<String, dynamic>).toList();
+          });
+          print('📋 Loaded ${_jobs.length} jobs with candidates');
+        } else {
+          print('⚠️ Jobs API returned success=false');
+        }
+      } else {
+        print('⚠️ Jobs API returned status: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('❌ Error fetching jobs with candidates: $e');
+      if (e is DioException) {
+        print('   Status: ${e.response?.statusCode}');
+        print('   Message: ${e.response?.data}');
+      }
     }
   }
 
@@ -289,8 +435,8 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                           Expanded(
                             child: _buildOverviewCard(
                               title: 'Open roles',
-                              value: '6',
-                              badge: '+2 this week',
+                              value: _isLoadingData ? '...' : '$_openRoles',
+                              badge: _openRoles > 0 ? '+${_openRoles} this week' : null,
                               subtitle: 'Across all locations',
                               badgeColor: Color(0xFF10B981),
                             ),
@@ -299,7 +445,7 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                           Expanded(
                             child: _buildOverviewCard(
                               title: 'Active candidates',
-                              value: '48',
+                              value: _isLoadingData ? '...' : '$_activeCandidates',
                               subtitle: 'In your current pipeline',
                             ),
                           ),
@@ -311,7 +457,7 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                           Expanded(
                             child: _buildOverviewCard(
                               title: 'Interviews today',
-                              value: '3',
+                              value: _isLoadingData ? '...' : '$_interviewsToday',
                               subtitle: 'Keep candidates',
                             ),
                           ),
@@ -319,7 +465,7 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                           Expanded(
                             child: _buildOverviewCard(
                               title: 'Pending reviews',
-                              value: '9',
+                              value: _isLoadingData ? '...' : '$_pendingReviews',
                               subtitle: 'Profiles to screen',
                             ),
                           ),
@@ -358,32 +504,69 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                       ),
                       SizedBox(height: 16.h),
                       // Job cards
-                      _buildJobCard(
-                        title: 'Data Center Technician',
-                        location: 'Seattle, WA',
-                        type: 'On-site',
-                        salary: '\$38-45/hr',
-                        candidates: '12 candidates',
-                        screening: 4,
-                        interviews: 2,
-                      ),
-                      SizedBox(height: 12.h),
-                      _buildJobCard(
-                        title: 'Warehouse Supervisor',
-                        location: 'Remote options',
-                        type: 'Full-time',
-                        candidates: '8 candidates',
-                        screening: 3,
-                        interviews: 1,
-                      ),
-                      SizedBox(height: 12.h),
-                      _buildJobCard(
-                        title: 'Night Shift Associate',
-                        location: 'Part-time',
-                        type: 'Shift-based',
-                        candidates: '0 candidates',
-                        isPending: true,
-                      ),
+                      if (_isLoadingData && _jobs.isEmpty)
+                        Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20.h),
+                            child: CircularProgressIndicator(),
+                          ),
+                        )
+                      else if (_jobs.isEmpty)
+                        Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(20.h),
+                            child: Text(
+                              'No jobs posted yet',
+                              style: TextStyle(
+                                fontSize: 14.sp,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        ..._jobs.map((job) {
+                          final jobId = job['jobId'] ?? job['id'];
+                          final title = job['jobTitle'] ?? 'Job Title';
+                          final location = job['location'] ?? 'Location';
+                          final workType = job['workType'] ?? 'Full-time';
+                          final locationType = job['locationType'] ?? 'On-site';
+                          final minPay = job['minPay']?.toDouble() ?? 0.0;
+                          final maxPay = job['maxPay']?.toDouble() ?? 0.0;
+                          final salaryType = job['salaryType']?.toString().toLowerCase() ?? 'monthly';
+                          
+                          String salary = '';
+                          if (salaryType == 'hr' || salaryType == 'hourly') {
+                            salary = '\$${minPay.toStringAsFixed(0)}-\$${maxPay.toStringAsFixed(0)}/hr';
+                          } else {
+                            final minK = (minPay / 1000).toStringAsFixed(0);
+                            final maxK = (maxPay / 1000).toStringAsFixed(0);
+                            salary = '\$${minK}k-\$${maxK}k';
+                          }
+                          
+                          final totalCandidates = job['totalCandidates'] ?? 0;
+                          final inScreening = job['inScreening'] ?? 0;
+                          final interviews = job['interviews'] ?? 0;
+                          final isPending = job['status'] == 'pending' || totalCandidates == 0;
+                          
+                          return Column(
+                            children: [
+                              _buildJobCard(
+                                title: title,
+                                location: location,
+                                type: locationType,
+                                salary: salary,
+                                candidates: '$totalCandidates candidates',
+                                screening: inScreening,
+                                interviews: interviews,
+                                isPending: isPending,
+                                jobId: jobId,
+                                jobData: job,
+                              ),
+                              SizedBox(height: 12.h),
+                            ],
+                          );
+                        }).toList(),
                       SizedBox(height: 30.h),
                     ],
                   ),
@@ -476,6 +659,8 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
     int? screening,
     int? interviews,
     bool isPending = false,
+    int? jobId,
+    Map<String, dynamic>? jobData,
   }) {
     return Container(
       padding: EdgeInsets.all(16),
@@ -571,6 +756,8 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                             jobTitle: title,
                             location: location,
                             totalCandidates: screening! + interviews!,
+                            jobId: jobId,
+                            jobData: jobData,
                           ),
                         );
                       },

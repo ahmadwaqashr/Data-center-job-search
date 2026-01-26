@@ -612,14 +612,26 @@ class JobDetailScreen extends StatelessWidget {
                           ),
                           SizedBox(height: 24.h),
                           // Quick apply button
-                          GestureDetector(
-                            onTap: () {
-                              Get.to(() => QuickApplyScreen(jobData: jobData));
+                          Builder(
+                            builder: (context) {
+                              final isApplied = jobData['applied'] == true || 
+                                               jobData['applicationStatus'] == 'applied';
+                              
+                              return GestureDetector(
+                                onTap: isApplied
+                                    ? null // Disable tap if already applied
+                                    : () {
+                                      Get.to(() => QuickApplyScreen(jobData: jobData));
+                                    },
+                                child: Opacity(
+                                  opacity: isApplied ? 0.6 : 1.0,
+                                  child: CustomButton(
+                                    text: isApplied ? 'Applied' : 'Quick apply',
+                                    icon: isApplied ? Icons.check_circle : Icons.send_outlined,
+                                  ),
+                                ),
+                              );
                             },
-                            child: CustomButton(
-                              text: 'Quick apply',
-                              icon: Icons.send_outlined,
-                            ),
                           ),
                           SizedBox(height: 30.h),
                         ],
