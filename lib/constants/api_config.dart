@@ -27,7 +27,8 @@ class ApiConfig {
   static const String fetchCandidatesByJob = '/api/appliedjob/fetch_candidates_by_job';
   static const String fetchCandidateDetails = '/api/appliedjob/fetch_candidate_details';
   static const String updateCandidateStage = '/api/appliedjob/update_candidate_stage';
-  
+  static const String scheduleInterview = '/api/appliedjob/schedule_interview';
+
   // Helper method to get edit skills URL with ID
   static String getEditSkillsUrl(int id) {
     return '$baseUrl/api/skills/edit_skills/$id';

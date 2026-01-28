@@ -1,8 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import '../pipeline/pipeline_screen.dart';
 
 class EmployerJobsScreen extends StatefulWidget {
@@ -14,6 +18,116 @@ class EmployerJobsScreen extends StatefulWidget {
 
 class _EmployerJobsScreenState extends State<EmployerJobsScreen> {
   int _selectedTab = 0; // 0: Open, 1: Closed, 2: Drafts
+  final Dio _dio = Dio();
+  List<Map<String, dynamic>> _openJobs = [];
+  List<Map<String, dynamic>> _closedJobs = [];
+  List<Map<String, dynamic>> _draftJobs = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchJobs();
+  }
+
+  @override
+  void dispose() {
+    _dio.close();
+    super.dispose();
+  }
+
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    if (authToken != null && authToken.isNotEmpty) return authToken;
+    final userDataString = prefs.getString('user_data');
+    if (userDataString != null) {
+      final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      final token = userData['token']?.toString();
+      if (token != null && token.isNotEmpty) return token;
+    }
+    return null;
+  }
+
+  Future<void> _fetchJobs() async {
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        setState(() => _isLoading = false);
+        return;
+      }
+      setState(() => _isLoading = true);
+      final response = await _dio.request(
+        ApiConfig.getUrl(ApiConfig.fetchEmployerApplications),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode({}),
+      );
+      if (response.statusCode == 200) {
+        final responseData = response.data;
+        if (responseData['success'] == true && responseData['data'] != null) {
+          final jobsData = responseData['data'] as List<dynamic>;
+          final all = jobsData.map((j) => j as Map<String, dynamic>).toList();
+          final statusKey = 'status';
+          final open = all.where((j) {
+            final s = (j[statusKey] ?? 'active').toString().toLowerCase();
+            return s == 'active' || s == 'open' || !s.contains('closed') && !s.contains('draft');
+          }).toList();
+          final closed = all.where((j) {
+            final s = (j[statusKey] ?? '').toString().toLowerCase();
+            return s.contains('closed') || s == 'archived' || s == 'filled';
+          }).toList();
+          final draft = all.where((j) {
+            final s = (j[statusKey] ?? '').toString().toLowerCase();
+            return s.contains('draft');
+          }).toList();
+          setState(() {
+            _openJobs = open.isNotEmpty ? open : all;
+            _closedJobs = closed;
+            _draftJobs = draft;
+            _isLoading = false;
+          });
+        } else {
+          setState(() => _isLoading = false);
+        }
+      } else {
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      if (e is DioException) {
+        print('❌ Employer jobs fetch: ${e.response?.statusCode} ${e.response?.data}');
+      }
+      setState(() => _isLoading = false);
+    }
+  }
+
+  static int _toInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v) ?? 0;
+    return 0;
+  }
+
+  String _formatTimeAgo(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '';
+    try {
+      final dt = DateTime.parse(dateStr);
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      return '${(diff.inDays / 7).floor()}w ago';
+    } catch (_) {
+      return dateStr;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -70,15 +184,19 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen> {
                   ),
                 ),
               ),
-              // Content
-              SingleChildScrollView(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20.w),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(height: 20.h),
-                      // Header
+              // Content – pull to refresh jobs
+              RefreshIndicator(
+                onRefresh: _fetchJobs,
+                color: AppColors.primaryColor,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20.w),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(height: 20.h),
+                        // Header
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -202,10 +320,10 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen> {
                           ),
                           Text(
                             _selectedTab == 0
-                                ? '3 open'
+                                ? '${_openJobs.length} open'
                                 : _selectedTab == 1
-                                ? '3 archived'
-                                : '2 drafts',
+                                ? '${_closedJobs.length} archived'
+                                : '${_draftJobs.length} drafts',
                             style: TextStyle(
                               fontSize: 14.sp,
                               color: Colors.grey[600],
@@ -215,11 +333,19 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen> {
                       ),
                       SizedBox(height: 16.h),
                       // Job listings based on selected tab
-                      if (_selectedTab == 0) ..._buildOpenJobs(),
-                      if (_selectedTab == 1) ..._buildClosedJobs(),
-                      if (_selectedTab == 2) ..._buildDraftJobs(),
-                      SizedBox(height: 30.h),
-                    ],
+                      if (_isLoading)
+                        Padding(
+                          padding: EdgeInsets.symmetric(vertical: 40.h),
+                          child: Center(child: CircularProgressIndicator(color: AppColors.primaryColor)),
+                        )
+                        else ...(_selectedTab == 0
+                            ? _buildOpenJobs()
+                            : _selectedTab == 1
+                                ? _buildClosedJobs()
+                                : _buildDraftJobs()),
+                        SizedBox(height: 30.h),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -257,125 +383,151 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen> {
   }
 
   List<Widget> _buildOpenJobs() {
-    return [
-      _buildOpenJobCard(
-        title: 'Data Center Technician',
-        company: 'EdgeCore Systems',
-        location: 'Seattle, WA',
-        type: 'On-site',
-        salary: '\$38-45/hr',
-        schedule: 'Shift-based',
-        badge: 'High match',
-        badgeColor: Color(0xFF10B981),
-        candidates: '12 candidates',
-        screening: 4,
-        interviews: 2,
-        isOpen: true,
-        postedTime: 'Posted 2h ago',
-      ),
-      SizedBox(height: 12.h),
-      _buildOpenJobCard(
-        title: 'Network Specialist',
-        company: 'EdgeCore Systems',
-        location: 'Remote (US)',
-        salary: '\$80k-95k',
-        schedule: 'Full-time',
-        additionalInfo: 'Day shifts',
-        candidates: '7 candidates',
-        screening: 3,
-        interviews: 1,
-        isOpen: true,
-        postedTime: 'Posted yesterday',
-      ),
-      SizedBox(height: 12.h),
-      _buildOpenJobCard(
-        title: 'Facilities Technician',
-        company: 'EdgeCore Systems',
-        location: 'Tacoma, WA',
-        type: 'On-site',
-        salary: '\$32-38/hr',
-        schedule: 'Shift-based',
-        badge: 'Priority',
-        badgeColor: Color(0xFFEF4444),
-        candidates: '5 candidates',
-        screening: 2,
-        interviews: 0,
-        isOpen: true,
-        postedTime: 'Posted 3 days ago',
-      ),
-    ];
+    if (_openJobs.isEmpty) {
+      return [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 40.h),
+          child: Center(
+            child: Text(
+              'No open roles',
+              style: TextStyle(fontSize: 14.sp, color: Colors.grey[600]),
+            ),
+          ),
+        ),
+      ];
+    }
+    return _openJobs.map((job) {
+      final jobId = job['jobId'] ?? job['id'];
+      final title = job['jobTitle'] ?? 'Job Title';
+      final company = job['companyName'] ?? 'Company';
+      final location = job['location'] ?? 'Location';
+      final locationType = job['locationType'] ?? 'On-site';
+      final workType = job['workType'] ?? 'Full-time';
+      final minPay = job['minPay']?.toDouble() ?? 0.0;
+      final maxPay = job['maxPay']?.toDouble() ?? 0.0;
+      final salaryType = (job['salaryType'] ?? 'monthly').toString().toLowerCase();
+      final salary = (salaryType == 'hr' || salaryType == 'hourly')
+          ? '\$${minPay.toStringAsFixed(0)}-\$${maxPay.toStringAsFixed(0)}/hr'
+          : '\$${(minPay / 1000).toStringAsFixed(0)}k-\$${(maxPay / 1000).toStringAsFixed(0)}k';
+      final totalCandidates = _toInt(job['totalCandidates'] ?? job['totalCandidatesCount']);
+      final inScreening = _toInt(job['inScreening'] ?? job['inScreeningCount']);
+      final interviews = _toInt(job['interviews'] ?? job['interviewsCount']);
+      final postedTime = _formatTimeAgo(job['createdAt']?.toString()) ?? 'Posted';
+      return Column(
+        children: [
+          _buildOpenJobCard(
+            title: title,
+            company: company,
+            location: location,
+            type: locationType,
+            salary: salary,
+            schedule: workType,
+            candidates: '$totalCandidates candidates',
+            screening: inScreening,
+            interviews: interviews,
+            isOpen: true,
+            postedTime: postedTime.isEmpty ? 'Posted' : 'Posted $postedTime',
+            jobId: jobId,
+            jobData: job,
+          ),
+          SizedBox(height: 12.h),
+        ],
+      );
+    }).toList();
   }
 
   List<Widget> _buildClosedJobs() {
-    return [
-      _buildClosedJobCard(
-        title: 'Data Center Technician',
-        company: 'EdgeCore Systems',
-        location: 'Seattle, WA',
-        type: 'On-site',
-        salary: '\$38-45/hr',
-        schedule: 'Shift-based',
-        badge: 'High match',
-        badgeColor: Color(0xFF10B981),
-        hires: 1,
-        archived: 11,
-        filledDays: 18,
-        closedDate: 'Filled on Mar 12',
-      ),
-      SizedBox(height: 12.h),
-      _buildClosedJobCard(
-        title: 'Network Operations Specialist',
-        company: 'EdgeCore Systems',
-        location: 'Remote (US)',
-        salary: '\$80k-95k',
-        schedule: 'Full-time',
-        additionalInfo: 'Day shifts',
-        hires: 2,
-        archived: 9,
-        closedBy: 'recruiter',
-        closedDate: 'Filled on Feb 28',
-      ),
-      SizedBox(height: 12.h),
-      _buildClosedJobCard(
-        title: 'Facilities Technician (Night shift)',
-        company: 'EdgeCore Systems',
-        location: 'Tacoma, WA',
-        type: 'On-site',
-        salary: '\$32-38/hr',
-        schedule: 'Shift-based',
-        badge: 'Priority role',
-        badgeColor: Color(0xFFEF4444),
-        hires: 0,
-        archived: 5,
-        closedBy: 'without hire',
-        closedDate: 'Archived on Jan 19',
-      ),
-    ];
+    if (_closedJobs.isEmpty) {
+      return [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 40.h),
+          child: Center(
+            child: Text(
+              'No closed roles',
+              style: TextStyle(fontSize: 14.sp, color: Colors.grey[600]),
+            ),
+          ),
+        ),
+      ];
+    }
+    return _closedJobs.map((job) {
+      final title = job['jobTitle'] ?? 'Job Title';
+      final company = job['companyName'] ?? 'Company';
+      final location = job['location'] ?? 'Location';
+      final locationType = job['locationType'] ?? 'On-site';
+      final workType = job['workType'] ?? 'Full-time';
+      final minPay = job['minPay']?.toDouble() ?? 0.0;
+      final maxPay = job['maxPay']?.toDouble() ?? 0.0;
+      final salaryType = (job['salaryType'] ?? 'monthly').toString().toLowerCase();
+      final salary = (salaryType == 'hr' || salaryType == 'hourly')
+          ? '\$${minPay.toStringAsFixed(0)}-\$${maxPay.toStringAsFixed(0)}/hr'
+          : '\$${(minPay / 1000).toStringAsFixed(0)}k-\$${(maxPay / 1000).toStringAsFixed(0)}k';
+      final totalCandidates = _toInt(job['totalCandidates'] ?? job['totalCandidatesCount']);
+      return Column(
+        children: [
+          _buildClosedJobCard(
+            title: title,
+            company: company,
+            location: location,
+            type: locationType,
+            salary: salary,
+            schedule: workType,
+            hires: _toInt(job['hires']),
+            archived: totalCandidates,
+            closedDate: () {
+                              final ago = _formatTimeAgo(job['updatedAt']?.toString());
+                              return ago.isNotEmpty ? 'Closed $ago' : 'Closed';
+                            }(),
+          ),
+          SizedBox(height: 12.h),
+        ],
+      );
+    }).toList();
   }
 
   List<Widget> _buildDraftJobs() {
-    return [
-      _buildDraftJobCard(
-        title: 'Senior Data Engineer',
-        company: 'EdgeCore Systems',
-        location: 'Remote (US)',
-        salary: '\$120k-150k',
-        schedule: 'Full-time',
-        lastEdited: 'Edited 2 days ago',
-        completionPercent: 85,
-      ),
-      SizedBox(height: 12.h),
-      _buildDraftJobCard(
-        title: 'DevOps Engineer',
-        company: 'EdgeCore Systems',
-        location: 'Seattle, WA',
-        type: 'Hybrid',
-        salary: '\$100k-130k',
-        schedule: 'Full-time',
-        lastEdited: 'Edited 1 week ago',
-        completionPercent: 60,
-      ),
-    ];
+    if (_draftJobs.isEmpty) {
+      return [
+        Padding(
+          padding: EdgeInsets.symmetric(vertical: 40.h),
+          child: Center(
+            child: Text(
+              'No draft roles',
+              style: TextStyle(fontSize: 14.sp, color: Colors.grey[600]),
+            ),
+          ),
+        ),
+      ];
+    }
+    return _draftJobs.map((job) {
+      final title = job['jobTitle'] ?? 'Job Title';
+      final company = job['companyName'] ?? 'Company';
+      final location = job['location'] ?? 'Location';
+      final locationType = job['locationType'];
+      final workType = job['workType'] ?? 'Full-time';
+      final minPay = job['minPay']?.toDouble() ?? 0.0;
+      final maxPay = job['maxPay']?.toDouble() ?? 0.0;
+      final salaryType = (job['salaryType'] ?? 'monthly').toString().toLowerCase();
+      final salary = (salaryType == 'hr' || salaryType == 'hourly')
+          ? '\$${minPay.toStringAsFixed(0)}-\$${maxPay.toStringAsFixed(0)}/hr'
+          : '\$${(minPay / 1000).toStringAsFixed(0)}k-\$${(maxPay / 1000).toStringAsFixed(0)}k';
+      final lastEdited = _formatTimeAgo(job['updatedAt']?.toString());
+      return Column(
+        children: [
+          _buildDraftJobCard(
+            title: title,
+            company: company,
+            location: location,
+            type: locationType,
+            salary: salary,
+            schedule: workType,
+            lastEdited: lastEdited.isEmpty ? 'Draft' : 'Edited $lastEdited',
+            completionPercent: job['completionPercent'] ?? 0,
+          ),
+          SizedBox(height: 12.h),
+        ],
+      );
+    }).toList();
   }
 
   Widget _buildOpenJobCard({
@@ -393,6 +545,8 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen> {
     required int interviews,
     required bool isOpen,
     required String postedTime,
+    dynamic jobId,
+    Map<String, dynamic>? jobData,
   }) {
     return Container(
       padding: EdgeInsets.all(16),
@@ -549,11 +703,18 @@ class _EmployerJobsScreenState extends State<EmployerJobsScreen> {
                   ),
                   GestureDetector(
                     onTap: () {
+                      final totalRaw = jobData != null
+                          ? (jobData['totalCandidates'] ?? jobData['totalCandidatesCount'] ?? screening + interviews)
+                          : (screening + interviews);
+                      final total = totalRaw is int ? totalRaw : (totalRaw is num ? totalRaw.toInt() : screening + interviews);
+                      final id = jobId is int ? jobId : (jobId is num ? jobId.toInt() : null);
                       Get.to(
                         () => PipelineScreen(
                           jobTitle: title,
                           location: location,
-                          totalCandidates: screening + interviews,
+                          totalCandidates: total,
+                          jobId: id,
+                          jobData: jobData,
                         ),
                       );
                     },

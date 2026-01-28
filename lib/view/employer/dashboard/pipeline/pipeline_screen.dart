@@ -36,7 +36,8 @@ class _PipelineScreenState extends State<PipelineScreen> {
   List<Map<String, dynamic>> _candidates = [];
   bool _isLoadingCandidates = true;
   String? _selectedStageFilter = 'In screening';
-  
+  String? _fetchError;
+
   // Stage counts
   int _appliedCount = 0;
   int _screeningCount = 0;
@@ -74,11 +75,22 @@ class _PipelineScreenState extends State<PipelineScreen> {
 
   Future<void> _fetchCandidates() async {
     if (widget.jobId == null) {
+      print('⚠️ Pipeline: jobId is null, skipping fetch');
       setState(() {
+        _candidates = [];
+        _appliedCount = 0;
+        _screeningCount = 0;
+        _interviewsCount = 0;
         _isLoadingCandidates = false;
+        _fetchError = null;
       });
       return;
     }
+
+    setState(() {
+      _fetchError = null;
+      _isLoadingCandidates = true;
+    });
 
     try {
       final token = await _getAuthToken();
@@ -86,13 +98,10 @@ class _PipelineScreenState extends State<PipelineScreen> {
         print('⚠️ No auth token for fetching candidates');
         setState(() {
           _isLoadingCandidates = false;
+          _fetchError = 'Please sign in again.';
         });
         return;
       }
-
-      setState(() {
-        _isLoadingCandidates = true;
-      });
 
       final response = await _dio.request(
         ApiConfig.getUrl(ApiConfig.fetchCandidatesByJob),
@@ -110,43 +119,50 @@ class _PipelineScreenState extends State<PipelineScreen> {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
-        print('✅ Candidates API Response: ${jsonEncode(responseData)}');
         if (responseData['success'] == true && responseData['data'] != null) {
           final candidatesData = responseData['data'] as List<dynamic>;
           final candidates = candidatesData.map((c) => c as Map<String, dynamic>).toList();
-          
-          // Count by stage
+
+          // Count by stage (match candidate_details_screen stages: Pending, Initial screening, Technical interview, Offer & onboarding)
           int applied = 0, screening = 0, interviews = 0;
           for (var candidate in candidates) {
-            final stage = candidate['stage']?.toString().toLowerCase() ?? 
-                         candidate['applicationStatus']?.toString().toLowerCase() ?? '';
-            if (stage.contains('pending') || stage.contains('applied')) {
+            final stage = (candidate['stage'] ?? candidate['applicationStatus'] ?? '')
+                .toString()
+                .trim()
+                .toLowerCase();
+            if (stage.isEmpty || stage.contains('pending') || stage.contains('applied')) {
               applied++;
-            } else if (stage.contains('screening')) {
+            } else if (stage.contains('screening') || stage.contains('initial')) {
               screening++;
-            } else if (stage.contains('interview')) {
+            } else if (stage.contains('interview') || stage.contains('technical')) {
               interviews++;
+            } else if (stage.contains('offer') || stage.contains('onboarding')) {
+              interviews++;
+            } else {
+              applied++;
             }
           }
-          
+
           setState(() {
             _candidates = candidates;
             _appliedCount = applied;
             _screeningCount = screening;
             _interviewsCount = interviews;
             _isLoadingCandidates = false;
+            _fetchError = null;
           });
-          print('👥 Loaded ${candidates.length} candidates: $applied applied, $screening screening, $interviews interviews');
         } else {
-          print('⚠️ Candidates API returned success=false');
           setState(() {
             _isLoadingCandidates = false;
+            _fetchError = 'Could not load candidates.';
           });
         }
       } else {
         print('⚠️ Candidates API returned status: ${response.statusCode}');
+        final msg = response.data is Map ? (response.data['message'] ?? 'Server error.') : 'Server error.';
         setState(() {
           _isLoadingCandidates = false;
+          _fetchError = msg.toString();
         });
       }
     } catch (e) {
@@ -155,8 +171,25 @@ class _PipelineScreenState extends State<PipelineScreen> {
         print('   Status: ${e.response?.statusCode}');
         print('   Message: ${e.response?.data}');
       }
+      String message = 'Unable to load candidates. Please try again.';
+      if (e is DioException && e.response?.statusCode != null) {
+        final code = e.response!.statusCode!;
+        final serverMsg = e.response?.data is Map ? e.response?.data['message']?.toString() : null;
+        if (code == 401) {
+          message = serverMsg ?? 'Session expired. Please sign in again.';
+        } else if (code == 403) {
+          message = serverMsg ?? 'You don\'t have access to this job.';
+        } else if (code == 400) {
+          message = serverMsg ?? 'Invalid request.';
+        } else if (code == 500) {
+          message = serverMsg ?? 'Server error. Please try again later or check with your admin.';
+        } else if (serverMsg != null && serverMsg.isNotEmpty) {
+          message = serverMsg;
+        }
+      }
       setState(() {
         _isLoadingCandidates = false;
+        _fetchError = message;
       });
     }
   }
@@ -274,7 +307,7 @@ class _PipelineScreenState extends State<PipelineScreen> {
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
-                            '${widget.totalCandidates}\ncandidates',
+                            '${_isLoadingCandidates ? widget.totalCandidates : _candidates.length}\ncandidates',
                             textAlign: TextAlign.left,
                             style: TextStyle(
                               fontSize: 13.sp,
@@ -520,8 +553,8 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                 child: _buildPipelineStageCard(
                                   'Applied',
                                   '$_appliedCount',
-                                  widget.totalCandidates > 0 
-                                      ? '${((_appliedCount / widget.totalCandidates) * 100).toStringAsFixed(0)}%'
+                                  (_candidates.isNotEmpty)
+                                      ? '${((_appliedCount / _candidates.length) * 100).toStringAsFixed(0)}%'
                                       : '0%',
                                 ),
                               ),
@@ -530,8 +563,8 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                 child: _buildPipelineStageCard(
                                   'In screening',
                                   '$_screeningCount',
-                                  widget.totalCandidates > 0
-                                      ? '${((_screeningCount / widget.totalCandidates) * 100).toStringAsFixed(0)}%'
+                                  (_candidates.isNotEmpty)
+                                      ? '${((_screeningCount / _candidates.length) * 100).toStringAsFixed(0)}%'
                                       : '0%',
                                 ),
                               ),
@@ -540,8 +573,8 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                 child: _buildPipelineStageCard(
                                   'Interviews',
                                   '$_interviewsCount',
-                                  widget.totalCandidates > 0
-                                      ? '${((_interviewsCount / widget.totalCandidates) * 100).toStringAsFixed(0)}%'
+                                  (_candidates.isNotEmpty)
+                                      ? '${((_interviewsCount / _candidates.length) * 100).toStringAsFixed(0)}%'
                                       : '0%',
                                 ),
                               ),
@@ -661,7 +694,37 @@ class _PipelineScreenState extends State<PipelineScreen> {
                             Center(
                               child: Padding(
                                 padding: EdgeInsets.all(20.h),
-                                child: CircularProgressIndicator(),
+                                child: CircularProgressIndicator(color: AppColors.primaryColor),
+                              ),
+                            )
+                          else if (_fetchError != null)
+                            Center(
+                              child: Padding(
+                                padding: EdgeInsets.all(20.h),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.error_outline, size: 48.sp, color: Colors.grey),
+                                    SizedBox(height: 12.h),
+                                    Text(
+                                      _fetchError!,
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        fontSize: 14.sp,
+                                        color: Colors.grey[700],
+                                      ),
+                                    ),
+                                    SizedBox(height: 16.h),
+                                    TextButton.icon(
+                                      onPressed: () => _fetchCandidates(),
+                                      icon: Icon(Icons.refresh, size: 18.sp),
+                                      label: Text('Retry'),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: AppColors.primaryColor,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             )
                           else if (_candidates.isEmpty)
@@ -679,14 +742,17 @@ class _PipelineScreenState extends State<PipelineScreen> {
                             )
                           else
                             ..._candidates.where((candidate) {
-                              final stage = candidate['stage']?.toString().toLowerCase() ?? 
-                                           candidate['applicationStatus']?.toString().toLowerCase() ?? '';
+                              final stage = (candidate['stage'] ?? candidate['applicationStatus'] ?? '')
+                                  .toString()
+                                  .trim()
+                                  .toLowerCase();
                               if (_selectedStageFilter == 'In screening') {
-                                return stage.contains('screening');
+                                return stage.contains('screening') || stage.contains('initial');
                               } else if (_selectedStageFilter == 'Interviews') {
-                                return stage.contains('interview');
+                                return stage.contains('interview') || stage.contains('technical') ||
+                                       stage.contains('offer') || stage.contains('onboarding');
                               } else if (_selectedStageFilter == 'Applied') {
-                                return stage.contains('pending') || stage.contains('applied');
+                                return stage.isEmpty || stage.contains('pending') || stage.contains('applied');
                               }
                               return true;
                             }).map((candidate) {
@@ -725,10 +791,10 @@ class _PipelineScreenState extends State<PipelineScreen> {
                                     actionIcon: stage == 'In screening' ? null : Icons.arrow_forward,
                                     stage: stage.toString(),
                                     actionType: stage.toString().toLowerCase().contains('screening') ? 'interview' : 'details',
-                                    candidateId: candidateId,
+                                    candidateId: _toInt(candidateId),
                                     candidateData: {
                                       ...candidate,
-                                      'id': applicationId, // Ensure applicationId is available
+                                      'id': _toInt(applicationId),
                                     },
                                   ),
                                   SizedBox(height: 12.h),
@@ -817,6 +883,15 @@ class _PipelineScreenState extends State<PipelineScreen> {
     }
   }
 
+  /// Coerce API value (int, num, or null) to int? for screen params
+  int? _toInt(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
+  }
+
   Widget _buildCandidateCard({
     required String name,
     required String experience,
@@ -832,17 +907,11 @@ class _PipelineScreenState extends State<PipelineScreen> {
     int? candidateId,
     Map<String, dynamic>? candidateData,
   }) {
+    final applicationId = _toInt(candidateData?['id']);
+    final cId = _toInt(candidateId);
     return GestureDetector(
       onTap: () {
-        print('🔵 Candidate card tapped: $name');
-        print('   actionType: $actionType');
-        print('   stage: $stage');
-        print('   candidateId: $candidateId');
-        print('   applicationId: ${candidateData?['id']}');
-        
         try {
-          // Always navigate to CandidateDetailsScreen when card is clicked
-          print('🔵 Navigating to CandidateDetailsScreen');
           Get.to(
             () => CandidateDetailsScreen(
               candidateName: name,
@@ -853,9 +922,11 @@ class _PipelineScreenState extends State<PipelineScreen> {
               availability: availability,
               matchPercent: matchPercent,
               stage: stage,
-              candidateId: candidateId,
-              applicationId: candidateData?['id'],
+              candidateId: cId,
+              applicationId: applicationId,
               candidateData: candidateData,
+              jobTitle: widget.jobTitle,
+              jobLocation: widget.location,
             ),
           );
         } catch (e) {

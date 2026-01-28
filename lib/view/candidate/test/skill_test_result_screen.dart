@@ -183,10 +183,14 @@ class _SkillTestResultScreenState extends State<SkillTestResultScreen> {
       // Generate reference ID
       final referenceId = _generateReferenceId();
 
-      // Prepare application payload
+      final rawJobId = widget.jobData?['id'] ?? widget.jobData?['jobId'];
+      final rawCandidateId = userData['id'];
+      final jobId = rawJobId is int ? rawJobId : (rawJobId is num ? rawJobId.toInt() : null);
+      final candidateId = rawCandidateId is int ? rawCandidateId : (rawCandidateId is num ? rawCandidateId.toInt() : null);
+
       final payload = {
-        'jobId': widget.jobData?['id'] ?? widget.jobData?['jobId'],
-        'candidateId': userData['id'],
+        'jobId': jobId,
+        'candidateId': candidateId,
         'referenceId': referenceId,
         'goodFitAnswer': widget.goodFitAnswer ?? '',
         'startDate': widget.startDate ?? '',
@@ -199,14 +203,6 @@ class _SkillTestResultScreenState extends State<SkillTestResultScreen> {
         'correctAnswers': widget.correctAnswers,
         'attemptedQuestions': widget.attemptedQuestions,
       };
-
-      print('📤 Submitting application:');
-      print('   Job ID: ${payload['jobId']}');
-      print('   Candidate ID: ${payload['candidateId']}');
-      print('   Reference ID: ${payload['referenceId']}');
-      print('   Skill Test Score: ${payload['skillTestScore']}%');
-      print('   Skill Test Passed: ${payload['skillTestPassed']}');
-      print('   Answers: ${skillTestAnswersList.length}');
 
       final response = await _dio.request(
         ApiConfig.getUrl(ApiConfig.applyJob),

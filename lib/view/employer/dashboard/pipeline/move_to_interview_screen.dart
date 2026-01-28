@@ -1,8 +1,12 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_screenutil/flutter_screenutil.dart';
 import 'package:get/get.dart';
+import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../constants/colors.dart';
+import '../../../../constants/api_config.dart';
 import 'stage_updated_screen.dart';
 
 class MoveToInterviewScreen extends StatefulWidget {
@@ -31,12 +35,129 @@ class _MoveToInterviewScreenState extends State<MoveToInterviewScreen> {
   TimeOfDay? selectedTime;
   final TextEditingController _interviewerController = TextEditingController();
   final TextEditingController _noteController = TextEditingController();
+  final Dio _dio = Dio();
+  bool _isSubmitting = false;
 
   @override
   void dispose() {
     _interviewerController.dispose();
     _noteController.dispose();
+    _dio.close();
     super.dispose();
+  }
+
+  Future<String?> _getAuthToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final authToken = prefs.getString('auth_token');
+    if (authToken != null && authToken.isNotEmpty) return authToken;
+    final userDataString = prefs.getString('user_data');
+    if (userDataString != null) {
+      final userData = jsonDecode(userDataString) as Map<String, dynamic>;
+      final token = userData['token']?.toString();
+      if (token != null && token.isNotEmpty) return token;
+    }
+    return null;
+  }
+
+  Future<void> _confirmMoveToInterview() async {
+    if (widget.applicationId == null) {
+      _navigateToStageUpdated();
+      return;
+    }
+    setState(() => _isSubmitting = true);
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        _navigateToStageUpdated();
+        return;
+      }
+      String? scheduledDate;
+      if (selectedDate != null) {
+        scheduledDate = '${selectedDate!.year}-${selectedDate!.month.toString().padLeft(2, '0')}-${selectedDate!.day.toString().padLeft(2, '0')}';
+      }
+      String? scheduledTime;
+      if (selectedTime != null) {
+        scheduledTime = '${selectedTime!.hour.toString().padLeft(2, '0')}:${selectedTime!.minute.toString().padLeft(2, '0')}';
+      }
+      final payload = {
+        'applicationId': widget.applicationId,
+        if (widget.candidateId != null) 'candidateId': widget.candidateId,
+        'stage': 'technical interview',
+        if (selectedInterviewType != null) 'interviewType': selectedInterviewType!.toLowerCase(),
+        if (scheduledDate != null) 'scheduledDate': scheduledDate,
+        if (scheduledTime != null) 'scheduledTime': scheduledTime,
+        if (_interviewerController.text.trim().isNotEmpty) 'interviewer': _interviewerController.text.trim(),
+        if (_noteController.text.trim().isNotEmpty) 'internalNote': _noteController.text.trim(),
+      };
+      await _dio.request(
+        ApiConfig.getUrl(ApiConfig.scheduleInterview),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode(payload),
+      );
+      if (mounted) Get.snackbar('Success', 'Moved to interview', backgroundColor: Color(0xFF10B981), colorText: Colors.white, snackPosition: SnackPosition.BOTTOM);
+      _navigateToStageUpdated();
+    } catch (e) {
+      if (e is DioException && e.response?.statusCode != null) {
+        Get.snackbar('Error', e.response?.data?['message']?.toString() ?? 'Failed to schedule interview', backgroundColor: Colors.red, colorText: Colors.white, snackPosition: SnackPosition.BOTTOM);
+      } else {
+        _navigateToStageUpdated();
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  Future<void> _skipAndMoveToInterview() async {
+    if (widget.applicationId == null) {
+      _navigateToStageUpdated();
+      return;
+    }
+    setState(() => _isSubmitting = true);
+    try {
+      final token = await _getAuthToken();
+      if (token == null) {
+        _navigateToStageUpdated();
+        return;
+      }
+      await _dio.request(
+        ApiConfig.getUrl(ApiConfig.updateCandidateStage),
+        options: Options(
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer $token',
+          },
+        ),
+        data: jsonEncode({
+          'applicationId': widget.applicationId,
+          'stage': 'technical interview',
+        }),
+      );
+      if (mounted) Get.snackbar('Success', 'Stage updated', backgroundColor: Color(0xFF10B981), colorText: Colors.white, snackPosition: SnackPosition.BOTTOM);
+      _navigateToStageUpdated();
+    } catch (e) {
+      if (mounted) Get.snackbar('Error', 'Failed to update stage', backgroundColor: Colors.red, colorText: Colors.white, snackPosition: SnackPosition.BOTTOM);
+      _navigateToStageUpdated();
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  void _navigateToStageUpdated() {
+    Get.to(
+      () => StageUpdatedScreen(
+        candidateName: widget.candidateName,
+        jobTitle: widget.jobTitle,
+        previousStage: widget.currentStage,
+        newStage: 'Interview',
+      ),
+    );
   }
 
   @override
@@ -748,51 +869,55 @@ class _MoveToInterviewScreenState extends State<MoveToInterviewScreen> {
                             child: Column(
                               children: [
                                 GestureDetector(
-                                  onTap: () {
-                                    Get.to(
-                                      () => StageUpdatedScreen(
-                                        candidateName: widget.candidateName,
-                                        jobTitle: widget.jobTitle,
-                                        previousStage: widget.currentStage,
-                                        newStage: 'Interview',
+                                  onTap: _isSubmitting ? null : _confirmMoveToInterview,
+                                  child: Opacity(
+                                    opacity: _isSubmitting ? 0.7 : 1,
+                                    child: Container(
+                                      width: double.infinity,
+                                      padding: EdgeInsets.symmetric(
+                                        vertical: 14.h,
                                       ),
-                                    );
-                                  },
-                                  child: Container(
-                                    width: double.infinity,
-                                    padding: EdgeInsets.symmetric(
-                                      vertical: 14.h,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.primaryColor,
-                                      borderRadius: BorderRadius.circular(25.r),
-                                    ),
-                                    child: Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.center,
-                                      children: [
-                                        Text(
-                                          'Confirm move to interview',
-                                          style: TextStyle(
-                                            fontSize: 15.sp,
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                        SizedBox(width: 8.w),
-                                        Icon(
-                                          Icons.arrow_forward,
-                                          color: Colors.white,
-                                          size: 16.sp,
-                                        ),
-                                      ],
+                                      decoration: BoxDecoration(
+                                        color: AppColors.primaryColor,
+                                        borderRadius: BorderRadius.circular(25.r),
+                                      ),
+                                      child: Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.center,
+                                        children: [
+                                          if (_isSubmitting)
+                                            SizedBox(
+                                              width: 20.w,
+                                              height: 20.h,
+                                              child: CircularProgressIndicator(
+                                                strokeWidth: 2,
+                                                color: Colors.white,
+                                              ),
+                                            )
+                                          else ...[
+                                            Text(
+                                              'Confirm move to interview',
+                                              style: TextStyle(
+                                                fontSize: 15.sp,
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.w600,
+                                              ),
+                                            ),
+                                            SizedBox(width: 8.w),
+                                            Icon(
+                                              Icons.arrow_forward,
+                                              color: Colors.white,
+                                              size: 16.sp,
+                                            ),
+                                          ],
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
                                 Center(
                                   child: TextButton(
-                                    onPressed: () {
-                                    },
+                                    onPressed: _isSubmitting ? null : _skipAndMoveToInterview,
                                     child: Text(
                                       'Skip scheduling for now',
                                       style: TextStyle(

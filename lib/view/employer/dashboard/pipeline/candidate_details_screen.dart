@@ -22,6 +22,8 @@ class CandidateDetailsScreen extends StatefulWidget {
   final int? candidateId;
   final int? applicationId;
   final Map<String, dynamic>? candidateData;
+  final String? jobTitle;
+  final String? jobLocation;
 
   const CandidateDetailsScreen({
     super.key,
@@ -36,6 +38,8 @@ class CandidateDetailsScreen extends StatefulWidget {
     this.candidateId,
     this.applicationId,
     this.candidateData,
+    this.jobTitle,
+    this.jobLocation,
   });
 
   @override
@@ -58,11 +62,60 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
     'Offer & onboarding'
   ];
   
-  // Helper method to format stage for display
   String _formatStageForDisplay(String stage) {
     if (stage.isEmpty) return stage;
-    return stage[0].toUpperCase() + stage.substring(1);
+    return stage[0].toUpperCase() + stage.substring(1).toLowerCase();
   }
+
+  String _formatTimeAgo(String? dateStr) {
+    if (dateStr == null || dateStr.isEmpty) return '';
+    try {
+      final dt = DateTime.parse(dateStr);
+      final now = DateTime.now();
+      final diff = now.difference(dt);
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+      if (diff.inHours < 24) return '${diff.inHours}h ago';
+      if (diff.inDays < 7) return '${diff.inDays}d ago';
+      if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}w ago';
+      return '${(diff.inDays / 30).floor()}mo ago';
+    } catch (_) {
+      return dateStr;
+    }
+  }
+
+  String get _displayName =>
+      _candidateDetails?['candidate']?['fullName']?.toString() ??
+      _candidateDetails?['candidate']?['fullname']?.toString() ??
+      widget.candidateName;
+
+  String get _displayExperience =>
+      _candidateDetails?['candidate']?['experienced']?.toString() ??
+      _candidateDetails?['candidate']?['experience']?.toString() ??
+      widget.experience;
+
+  String get _displayLocation =>
+      _candidateDetails?['candidate']?['location']?.toString() ??
+      widget.location;
+
+  String get _displaySkillTest {
+    final score = _candidateDetails?['application']?['skillTestScore'];
+    if (score != null) return '${(score is num ? score.toDouble() : double.tryParse(score.toString()) ?? 0).toStringAsFixed(0)}%';
+    return widget.skillTest;
+  }
+
+  String get _displayMatch =>
+      _candidateDetails?['application']?['matchPercent']?.toString() ??
+      widget.matchPercent;
+
+  String? get _displayAvailability =>
+      _candidateDetails?['application']?['startDate']?.toString() ??
+      widget.availability;
+
+  String get _displayJobTitle =>
+      widget.jobTitle ?? _candidateDetails?['application']?['jobTitle']?.toString() ?? 'Job';
+
+  String get _displayJobLocation =>
+      widget.jobLocation ?? widget.location;
   
   @override
   void initState() {
@@ -131,15 +184,15 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
-        print('✅ Candidate Details API Response: ${jsonEncode(responseData)}');
         if (responseData['success'] == true && responseData['data'] != null) {
+          final data = responseData['data'] as Map<String, dynamic>;
+          final app = data['application'] as Map<String, dynamic>?;
           setState(() {
-            _candidateDetails = responseData['data'] as Map<String, dynamic>;
+            _candidateDetails = data;
+            _selectedStage = app?['stage']?.toString() ?? _selectedStage ?? widget.stage;
             _isLoadingDetails = false;
           });
-          print('👤 Candidate details loaded');
         } else {
-          print('⚠️ Candidate Details API returned success=false');
           setState(() {
             _isLoadingDetails = false;
           });
@@ -211,7 +264,6 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
 
       if (response.statusCode == 200) {
         final responseData = response.data;
-        print('✅ Update Stage API Response: ${jsonEncode(responseData)}');
         if (responseData['success'] == true) {
           setState(() {
             _selectedStage = newStage;
@@ -352,7 +404,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                               ),
                               SizedBox(height: 2.h),
                               Text(
-                                'Data Center Technician • Seattle, WA',
+                                '$_displayJobTitle • $_displayJobLocation',
                                 style: TextStyle(
                                   fontSize: 13.sp,
                                   color: Colors.grey[600],
@@ -371,7 +423,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                             borderRadius: BorderRadius.circular(20.r),
                           ),
                           child: Text(
-                            'In\nscreening',
+                            _formatStageForDisplay(_selectedStage ?? widget.stage).replaceAll(' ', '\n'),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 13.sp,
@@ -405,7 +457,12 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                 ),
                               ],
                             ),
-                            child: Column(
+                            child: _isLoadingDetails && _candidateDetails == null
+                                ? Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 24.h),
+                                    child: Center(child: CircularProgressIndicator(color: AppColors.primaryColor)),
+                                  )
+                                : Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
@@ -431,8 +488,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            _candidateDetails?['candidate']?['fullName'] ?? 
-                                            widget.candidateName,
+                                            _displayName,
                                             style: TextStyle(
                                               fontSize: 18.sp,
                                               fontWeight: FontWeight.bold,
@@ -441,7 +497,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                           ),
                                           SizedBox(height: 4.h),
                                           Text(
-                                            '${_candidateDetails?['candidate']?['experienced'] ?? widget.experience} • ${widget.shiftType} • ${_candidateDetails?['candidate']?['location'] ?? widget.location}',
+                                            '$_displayExperience • ${widget.shiftType} • $_displayLocation',
                                             style: TextStyle(
                                               fontSize: 13.sp,
                                               color: Colors.grey[600],
@@ -464,7 +520,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                         ),
                                       ),
                                       child: Text(
-                                        'Match\n${_candidateDetails?['application']?['matchPercent'] ?? widget.matchPercent}',
+                                        'Match\n$_displayMatch',
                                         textAlign: TextAlign.center,
                                         style: TextStyle(
                                           fontSize: 13.sp,
@@ -489,14 +545,14 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                         borderRadius: BorderRadius.circular(15),
                                       ),
                                       child: Text(
-                                        'Skill test ${_candidateDetails?['application']?['skillTestScore']?.toStringAsFixed(0) ?? widget.skillTest}%',
+                                        'Skill test $_displaySkillTest',
                                         style: TextStyle(
                                           fontSize: 13.sp,
                                           color: Colors.grey[700],
                                         ),
                                       ),
                                     ),
-                                    if (widget.availability != null) ...[
+                                    if (_displayAvailability != null && _displayAvailability!.isNotEmpty) ...[
                                       SizedBox(width: 16.w),
                                       Container(
                                         padding: EdgeInsets.symmetric(
@@ -510,7 +566,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                           ),
                                         ),
                                         child: Text(
-                                          widget.availability!,
+                                          _displayAvailability!,
                                           style: TextStyle(
                                             fontSize: 13.sp,
                                             color: Colors.grey[700],
@@ -531,7 +587,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                     borderRadius: BorderRadius.circular(15),
                                   ),
                                   child: Text(
-                                    'On-site • Shift-based',
+                                    '${_candidateDetails?['application']?['locationType'] ?? _candidateDetails?['candidate']?['locationType'] ?? 'On-site'} • ${_candidateDetails?['application']?['workType'] ?? _candidateDetails?['candidate']?['workType'] ?? widget.shiftType}',
                                     style: TextStyle(
                                       fontSize: 13.sp,
                                       color: Colors.grey[600],
@@ -543,7 +599,9 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                   children: [
                                     Text(
-                                      'Last updated • 2 days ago',
+                                      _candidateDetails?['application']?['updatedAt'] != null
+                                          ? 'Last updated • ${_formatTimeAgo(_candidateDetails!['application']?['updatedAt']?.toString())}'
+                                          : 'Last updated',
                                       style: TextStyle(
                                         fontSize: 12.sp,
                                         color: Colors.grey[600],
@@ -551,7 +609,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                     ),
                                     GestureDetector(
                                       onTap: () {
-                                        Get.to(ChatScreen(name: 'Alex Johnson', avatar: 'avatar', isOnline: true));
+                                        Get.to(ChatScreen(name: _displayName, avatar: 'avatar', isOnline: true));
                                       },
                                       child: Container(
                                         padding: EdgeInsets.symmetric(
@@ -763,11 +821,11 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                                         onTap: () {
                                           Get.to(
                                             () => MoveToInterviewScreen(
-                                              candidateName:
-                                                  widget.candidateName,
-                                              jobTitle:
-                                                  'Data Center Technician',
+                                              candidateName: _displayName,
+                                              jobTitle: _displayJobTitle,
                                               currentStage: _selectedStage ?? widget.stage,
+                                              applicationId: widget.applicationId,
+                                              candidateId: widget.candidateId,
                                             ),
                                           );
                                         },
@@ -936,7 +994,9 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
             ),
             SizedBox(height: 4.h),
             Text(
-              'Data Center Technician • L3 operations & on-call rotations',
+              _candidateDetails?['candidate']?['headline']?.toString() ??
+                  _candidateDetails?['candidate']?['bio']?.toString() ??
+                  '$_displayExperience experience • $_displayLocation',
               style: TextStyle(
                 fontSize: 14.sp,
                 color: Colors.black,
@@ -950,7 +1010,9 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
             ),
             SizedBox(height: 4.h),
             Text(
-              '4 years • EdgeCore Systems, Night shift lead • Previous: NOC Technician',
+              _candidateDetails?['candidate']?['experienceSummary']?.toString() ??
+                  _candidateDetails?['candidate']?['experienced']?.toString() ??
+                  '$_displayExperience yrs • ${_candidateDetails?['candidate']?['currentCompany'] ?? '—'}',
               style: TextStyle(
                 fontSize: 14.sp,
                 color: Colors.grey,
@@ -964,7 +1026,14 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
             ),
             SizedBox(height: 4.h),
             Text(
-              'Rack & stack • Troubleshooting • Ticketing • Incident response • Hardware swaps',
+              () {
+                final skills = _candidateDetails?['candidate']?['skills'];
+                if (skills != null) {
+                  if (skills is List) return (skills as List).map((e) => e.toString()).join(' • ');
+                  return skills.toString();
+                }
+                return _candidateDetails?['candidate']?['coreSkills']?.toString() ?? '—';
+              }(),
               style: TextStyle(
                 fontSize: 14.sp,
                 color: Colors.grey,
@@ -1061,7 +1130,9 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Alex_Johnson_Resume.pdf',
+                          _candidateDetails?['candidate']?['cvFileName']?.toString() ??
+                              _candidateDetails?['candidate']?['cvPath']?.toString().split('/').last ??
+                              '${_displayName.replaceAll(' ', '_')}_Resume.pdf',
                           style: TextStyle(
                             fontSize: 14.sp,
                             fontWeight: FontWeight.w600,
@@ -1070,7 +1141,9 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                         ),
                         SizedBox(height: 4.h),
                         Text(
-                          'Updated 2 weeks ago • 2 pages • 350 KB',
+                          _candidateDetails?['candidate']?['cvUpdatedDate'] != null
+                              ? 'Updated ${_formatTimeAgo(_candidateDetails!['candidate']?['cvUpdatedDate']?.toString())}'
+                              : 'Resume',
                           style: TextStyle(
                             fontSize: 12.sp,
                             color: Colors.grey[600],
@@ -1102,7 +1175,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                 Row(
                   children: [
                     Text(
-                      '92%',
+                      _displaySkillTest,
                       style: TextStyle(
                         fontSize: 13.sp,
                         color: Color(0xFF10B981),
@@ -1111,7 +1184,7 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
                     ),
                     SizedBox(width: 4.w),
                     Text(
-                      '• Data Center basics',
+                      '• Skill test',
                       style: TextStyle(
                         fontSize: 13.sp,
                         color: Color(0xFF10B981),
@@ -1183,11 +1256,34 @@ class _CandidateDetailsScreenState extends State<CandidateDetailsScreen> {
               style: TextStyle(fontSize: 13.sp, color: Colors.grey[600]),
             ),
             SizedBox(height: 10.h),
-            _buildActivityItem('Moved to screening', 'Today • 9:12 AM'),
-            SizedBox(height: 5.h),
-            _buildActivityItem('Skill test completed', 'Yesterday • 3:45 PM'),
-            SizedBox(height: 5.h),
-            _buildActivityItem('Application received', '2 days ago'),
+            if (_candidateDetails?['activity'] != null && _candidateDetails!['activity'] is List && (_candidateDetails!['activity'] as List).isNotEmpty)
+              ...(_candidateDetails!['activity'] as List).map<Widget>((a) {
+                final m = a is Map<String, dynamic> ? a : <String, dynamic>{};
+                return Padding(
+                  padding: EdgeInsets.only(bottom: 5.h),
+                  child: _buildActivityItem(
+                    m['title']?.toString() ?? m['action']?.toString() ?? 'Activity',
+                    m['time']?.toString() ?? _formatTimeAgo(m['createdAt']?.toString()) ?? '—',
+                  ),
+                );
+              }).toList()
+            else ...[
+              if (_candidateDetails?['application']?['updatedAt'] != null)
+                Padding(
+                  padding: EdgeInsets.only(bottom: 5.h),
+                  child: _buildActivityItem('Stage updated', _formatTimeAgo(_candidateDetails!['application']?['updatedAt']?.toString())),
+                ),
+              if (_candidateDetails?['application']?['updatedAt'] != null) SizedBox(height: 5.h),
+              Padding(
+                padding: EdgeInsets.only(bottom: 5.h),
+                child: _buildActivityItem(
+                  'Application received',
+                  _candidateDetails?['application']?['createdAt'] != null
+                      ? _formatTimeAgo(_candidateDetails!['application']?['createdAt']?.toString())
+                      : '—',
+                ),
+              ),
+            ],
           ],
         ),
       ),

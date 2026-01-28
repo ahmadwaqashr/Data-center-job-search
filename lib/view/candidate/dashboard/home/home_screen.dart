@@ -222,14 +222,20 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              // Content
-              SingleChildScrollView(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16.w),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(height: 16.h),
+              // Content – pull to refresh jobs (e.g. after applying elsewhere)
+              RefreshIndicator(
+                onRefresh: () async {
+                  await _fetchJobs(searchQuery: _searchController.text.trim().isEmpty ? null : _searchController.text.trim());
+                },
+                color: AppColors.primaryColor,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16.w),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(height: 16.h),
                       // Header
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -572,8 +578,9 @@ class _HomeScreenState extends State<HomeScreen> {
                             ],
                           );
                         }).toList(),
-                      SizedBox(height: 30.h),
-                    ],
+                        SizedBox(height: 30.h),
+                      ],
+                    ),
                   ),
                 ),
               ),

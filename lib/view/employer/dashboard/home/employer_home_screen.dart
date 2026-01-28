@@ -76,17 +76,20 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
     return null;
   }
 
+  static int _toInt(dynamic v) {
+    if (v == null) return 0;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v) ?? 0;
+    return 0;
+  }
+
   Future<void> _fetchOverviewData() async {
     try {
       final token = await _getAuthToken();
-      if (token == null) {
-        print('⚠️ No auth token for fetching overview');
-        return;
-      }
-
-      setState(() {
-        _isLoadingData = true;
-      });
+      if (token == null) return;
+      if (!mounted) return;
+      setState(() => _isLoadingData = true);
 
       final response = await _dio.request(
         ApiConfig.getUrl(ApiConfig.fetchEmployerOverview),
@@ -100,40 +103,27 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
         data: jsonEncode({}),
       );
 
+      if (!mounted) return;
       if (response.statusCode == 200) {
         final responseData = response.data;
-        print('✅ Overview API Response: ${jsonEncode(responseData)}');
         if (responseData['success'] == true && responseData['data'] != null) {
           final data = responseData['data'] as Map<String, dynamic>;
-          setState(() {
-            _openRoles = (data['openRoles'] ?? data['openRolesCount'] ?? 0) as int;
-            _activeCandidates = (data['activeCandidates'] ?? data['activeCandidatesCount'] ?? 0) as int;
-            _interviewsToday = (data['interviewsToday'] ?? data['interviewsTodayCount'] ?? 0) as int;
-            _pendingReviews = (data['pendingReviews'] ?? data['pendingReviewsCount'] ?? 0) as int;
+          if (mounted) setState(() {
+            _openRoles = _toInt(data['openRoles'] ?? data['openRolesCount']);
+            _activeCandidates = _toInt(data['activeCandidates'] ?? data['activeCandidatesCount']);
+            _interviewsToday = _toInt(data['interviewsToday'] ?? data['interviewsTodayCount']);
+            _pendingReviews = _toInt(data['pendingReviews'] ?? data['pendingReviewsCount']);
             _isLoadingData = false;
           });
-          print('📊 Overview loaded: $_openRoles roles, $_activeCandidates candidates');
         } else {
-          print('⚠️ Overview API returned success=false');
-          setState(() {
-            _isLoadingData = false;
-          });
+          if (mounted) setState(() => _isLoadingData = false);
         }
       } else {
-        print('⚠️ Overview API returned status: ${response.statusCode}');
-        setState(() {
-          _isLoadingData = false;
-        });
+        if (mounted) setState(() => _isLoadingData = false);
       }
     } catch (e) {
-      print('❌ Error fetching overview data: $e');
-      if (e is DioException) {
-        print('   Status: ${e.response?.statusCode}');
-        print('   Message: ${e.response?.data}');
-      }
-      setState(() {
-        _isLoadingData = false;
-      });
+      if (e is DioException) {}
+      if (mounted) setState(() => _isLoadingData = false);
     }
   }
 
@@ -157,48 +147,40 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
         data: jsonEncode({}),
       );
 
+      if (!mounted) return;
       if (response.statusCode == 200) {
         final responseData = response.data;
-        print('✅ Jobs API Response: ${jsonEncode(responseData)}');
         if (responseData['success'] == true && responseData['data'] != null) {
           final jobsData = responseData['data'] as List<dynamic>;
-          setState(() {
+          if (mounted) setState(() {
             _jobs = jobsData.map((job) => job as Map<String, dynamic>).toList();
           });
-          print('📋 Loaded ${_jobs.length} jobs with candidates');
-        } else {
-          print('⚠️ Jobs API returned success=false');
         }
-      } else {
-        print('⚠️ Jobs API returned status: ${response.statusCode}');
       }
     } catch (e) {
-      print('❌ Error fetching jobs with candidates: $e');
-      if (e is DioException) {
-        print('   Status: ${e.response?.statusCode}');
-        print('   Message: ${e.response?.data}');
-      }
+      if (e is DioException) {}
     }
   }
 
   Future<void> _loadUserData() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      if (!mounted) return;
       final userDataString = prefs.getString('user_data');
       if (userDataString != null) {
         final userData = jsonDecode(userDataString) as Map<String, dynamic>;
-        setState(() {
+        if (mounted) setState(() {
           _userData = userData;
           _isLoading = false;
         });
       } else {
-        setState(() {
+        if (mounted) setState(() {
           _isLoading = false;
         });
       }
     } catch (e) {
       print('Error loading user data: $e');
-      setState(() {
+      if (mounted) setState(() {
         _isLoading = false;
       });
     }
@@ -260,14 +242,21 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                   ),
                 ),
               ),
-              // Content
-              SingleChildScrollView(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 20.w),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      SizedBox(height: 20.h),
+              // Content – pull to refresh overview and jobs
+              RefreshIndicator(
+                onRefresh: () async {
+                  await _fetchOverviewData();
+                  await _fetchJobsWithCandidates();
+                },
+                color: AppColors.primaryColor,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 20.w),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(height: 20.h),
                       // Header with greeting and profile
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -544,10 +533,11 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                             salary = '\$${minK}k-\$${maxK}k';
                           }
                           
-                          final totalCandidates = job['totalCandidates'] ?? 0;
-                          final inScreening = job['inScreening'] ?? 0;
-                          final interviews = job['interviews'] ?? 0;
-                          final isPending = job['status'] == 'pending' || totalCandidates == 0;
+                          final totalCandidates = _toInt(job['totalCandidates'] ?? job['totalCandidatesCount']);
+                          final inScreening = _toInt(job['inScreening'] ?? job['inScreeningCount']);
+                          final interviews = _toInt(job['interviews'] ?? job['interviewsCount'] ?? job['interviewsToday']);
+                          
+                          final isPending = totalCandidates == 0 || (totalCandidates > 0 && inScreening == 0 && interviews == 0);
                           
                           return Column(
                             children: [
@@ -567,8 +557,9 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                             ],
                           );
                         }).toList(),
-                      SizedBox(height: 30.h),
-                    ],
+                        SizedBox(height: 30.h),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -662,106 +653,120 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
     int? jobId,
     Map<String, dynamic>? jobData,
   }) {
-    return Container(
-      padding: EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12.r),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 10,
-            offset: Offset(0, 2),
+    final totalCandidates = (screening ?? 0) + (interviews ?? 0);
+    return GestureDetector(
+      onTap: () {
+        Get.to(
+          () => PipelineScreen(
+            jobTitle: title,
+            location: location,
+            totalCandidates: totalCandidates,
+            jobId: jobId,
+            jobData: jobData,
           ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 16.sp,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black,
-                  ),
-                ),
-              ),
-              Text(
-                candidates,
-                style: TextStyle(fontSize: 13.sp, color: Colors.grey[600]),
-              ),
-            ],
-          ),
-          SizedBox(height: 6.h),
-          Text(
-            '$location • $type${salary != null ? ' • $salary' : ''}',
-            style: TextStyle(fontSize: 13.sp, color: Colors.grey[600]),
-          ),
-          SizedBox(height: 12.h),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              if (!isPending && screening != null && interviews != null)
-                Text(
-                  '$screening in screening  $interviews interviews',
-                  style: TextStyle(fontSize: 13.sp, color: Colors.grey[700]),
-                )
-              else if (isPending)
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(6.r),
-                  ),
+        );
+      },
+      child: Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12.r),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04),
+              blurRadius: 10,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
                   child: Text(
-                    'Pending',
+                    title,
                     style: TextStyle(
-                      fontSize: 12.sp,
-                      color: Colors.grey[700],
-                      fontWeight: FontWeight.w500,
+                      fontSize: 16.sp,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
                     ),
                   ),
                 ),
-              Row(
-                children: [
-                  if (isPending)
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.rocket_launch,
-                          color: AppColors.primaryColor,
-                          size: 14.sp,
+                Text(
+                  candidates,
+                  style: TextStyle(fontSize: 13.sp, color: Colors.grey[600]),
+                ),
+              ],
+            ),
+            SizedBox(height: 6.h),
+            Text(
+              '$location • $type${salary != null ? ' • $salary' : ''}',
+              style: TextStyle(fontSize: 13.sp, color: Colors.grey[600]),
+            ),
+            SizedBox(height: 12.h),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                if (!isPending && screening != null && interviews != null)
+                  Text(
+                    '$screening in screening  $interviews interviews',
+                    style: TextStyle(fontSize: 13.sp, color: Colors.grey[700]),
+                  )
+                else if (isPending)
+                  Container(
+                    padding: EdgeInsets.symmetric(horizontal: 8.w, vertical: 4.h),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[100],
+                      borderRadius: BorderRadius.circular(6.r),
+                    ),
+                    child: Text(
+                      'Pending',
+                      style: TextStyle(
+                        fontSize: 12.sp,
+                        color: Colors.grey[700],
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                Row(
+                  children: [
+                    if (isPending)
+                      GestureDetector(
+                        onTap: () {
+                          Get.snackbar(
+                            'Boost listing',
+                            'Coming soon',
+                            backgroundColor: AppColors.primaryColor.withOpacity(0.9),
+                            colorText: Colors.white,
+                            snackPosition: SnackPosition.BOTTOM,
+                            duration: Duration(seconds: 2),
+                          );
+                        },
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.rocket_launch,
+                              color: AppColors.primaryColor,
+                              size: 14.sp,
+                            ),
+                            SizedBox(width: 4.w),
+                            Text(
+                              'Boost listing',
+                              style: TextStyle(
+                                fontSize: 13.sp,
+                                color: AppColors.primaryColor,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
-                        SizedBox(width: 4.w),
-                        Text(
-                          'Boost listing',
-                          style: TextStyle(
-                            fontSize: 13.sp,
-                            color: AppColors.primaryColor,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    )
-                  else
-                    GestureDetector(
-                      onTap: () {
-                        Get.to(
-                          () => PipelineScreen(
-                            jobTitle: title,
-                            location: location,
-                            totalCandidates: screening! + interviews!,
-                            jobId: jobId,
-                            jobData: jobData,
-                          ),
-                        );
-                      },
-                      child: Row(
+                      )
+                    else
+                      Row(
                         children: [
                           Text(
                             'View pipeline',
@@ -779,12 +784,12 @@ class _EmployerHomeScreenState extends State<EmployerHomeScreen> {
                           ),
                         ],
                       ),
-                    ),
-                ],
-              ),
-            ],
-          ),
-        ],
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
